@@ -1,15 +1,55 @@
 channels:
-  - username: "@bankiros_ru"
-    title: "Банкирос"
-    topics: ["банки", "финтех"]
+  - username: "@sbmarketing"
+    title: "News & Trends by Sber"
+    topics: ["банки", "финтех", "ии", "клиентский сервис", "розница"]
     active: true
 
-  - username: "@fintechnews_ru"
-    title: "Финтех новости"
-    topics: ["финтех", "платежи"]
+  - username: "@blockchainRF"
+    title: "Блокчейн / Web3 в России"
+    topics: ["крипто / блокчейн", "регуляторика", "финтех", "платежи"]
     active: true
 
-  - username: "@ai_machinelearning_big_data"
-    title: "ИИ и ML"
-    topics: ["ии"]
+  - username: "@ict_moscow_ai"
+    title: "База знаний AI"
+    topics: ["ии", "ит-инфраструктура", "обучение"]
+    active: true
+
+  - username: "@abulaphia"
+    title: "Innovation & Research"
+    topics: ["ии", "финтех", "клиентский сервис", "маркетинг"]
+    active: true
+
+  - username: "@sberpremiernew"
+    title: "СберПремьер"
+    topics: ["банки", "финтех", "клиентский сервис", "мсб"]
+    active: true
+
+  - username: "@disruptors_official"
+    title: "Дизраптор"
+    topics: ["финтех", "ии", "розница", "клиентский сервис", "маркетинг"]
+    active: true
+
+  - username: "@fintechassociation"
+    title: "Ассоциация ФинТех"
+    topics: ["финтех", "банки", "платежи", "регуляторика", "биометрия"]
+    active: true
+
+  - username: "@fintexno"
+    title: "Финтехно"
+    topics: ["банки", "финтех", "клиентский сервис", "мсб"]
+    active: true
+
+  - username: "@telecommunal"
+    title: "Телекоммуналка"
+    topics: ["ии", "клиентский сервис", "маркетинг", "обучение"]
+    active: true
+
+  - username: "@it2b_channel"
+    title: "СофтТех"
+    topics: ["финтех", "ии", "розница", "клиентский сервис", "маркетинг"]
+    active: true
+
+  - username: "@biznetics"
+    title: "Biznetics | AI для бизнеса"
+    topics: ["финтех", "банки", "платежи", "регуляторика", "биометрия"]
     active: true
