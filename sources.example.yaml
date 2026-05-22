@@ -1,0 +1,15 @@
+channels:
+  - username: "@bankiros_ru"
+    title: "Банкирос"
+    topics: ["банки", "финтех"]
+    active: true
+
+  - username: "@fintechnews_ru"
+    title: "Финтех новости"
+    topics: ["финтех", "платежи"]
+    active: true
+
+  - username: "@ai_machinelearning_big_data"
+    title: "ИИ и ML"
+    topics: ["ии"]
+    active: true

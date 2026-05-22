@@ -1,0 +1,23 @@
+# Секреты
+.env
+*.session
+
+# База данных и экспорты
+data/tg_news.db
+data/test_pipeline.db
+data/exports/
+data/digests/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+*.egg-info/
+
+# Инструменты
+.pytest_cache/
+.ruff_cache/
+
+# macOS
+.DS_Store
