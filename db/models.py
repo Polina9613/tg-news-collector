@@ -104,6 +104,9 @@ class Trend(Base):
     slug: Mapped[str] = mapped_column(unique=True)
     description: Mapped[str | None]
     tags: Mapped[str | None]  # JSON-список тегов
+    status: Mapped[str] = mapped_column(default="active")  # active / pending / legacy / rejected
+    category: Mapped[str | None]  # категория для группировки
+    proposed_by_case_id: Mapped[int | None]  # для pending — какой кейс предложил тренд
     first_seen_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         default=datetime.utcnow, onupdate=datetime.utcnow
@@ -119,7 +122,7 @@ class TrendCase(Base):
     __tablename__ = "trend_cases"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    news_card_id: Mapped[int] = mapped_column(ForeignKey("news_cards.id"))
+    news_card_id: Mapped[int | None] = mapped_column(ForeignKey("news_cards.id"), default=None)
     trend_id: Mapped[int | None] = mapped_column(ForeignKey("trends.id"), default=None)
     trend_name: Mapped[str | None]
     case_title: Mapped[str | None]
@@ -130,10 +133,51 @@ class TrendCase(Base):
     source_url: Mapped[str | None]
     market: Mapped[str | None]
     period_label: Mapped[str | None]  # "2026-Q2"
+    industry: Mapped[str | None]  # отрасль из фиксированного списка
+    is_duplicate: Mapped[bool] = mapped_column(default=False)
+    duplicate_of_case_id: Mapped[int | None] = mapped_column(
+        ForeignKey("trend_cases.id"), default=None
+    )
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
-    news_card: Mapped["NewsCard"] = relationship(back_populates="trend_cases")
+    news_card: Mapped["NewsCard | None"] = relationship(back_populates="trend_cases")
     trend: Mapped["Trend | None"] = relationship(back_populates="cases")
 
     def __repr__(self) -> str:
         return f"<TrendCase id={self.id} trend={self.trend_name!r}>"
+
+
+class BotUser(Base):
+    __tablename__ = "bot_users"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    telegram_id: Mapped[int] = mapped_column(unique=True, index=True)
+    username: Mapped[str | None]
+    first_name: Mapped[str | None]
+    last_name: Mapped[str | None]
+    role: Mapped[str] = mapped_column(default="analyst")  # admin / analyst
+    is_active: Mapped[bool] = mapped_column(default=True)
+    joined_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    last_active_at: Mapped[datetime] = mapped_column(
+        default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def __repr__(self) -> str:
+        return f"<BotUser id={self.id} tg={self.telegram_id} role={self.role!r}>"
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("bot_users.id"))
+    action: Mapped[str]
+    target_type: Mapped[str | None]
+    target_id: Mapped[int | None]
+    payload: Mapped[str | None]  # JSON
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<AuditLog action={self.action!r} target={self.target_type}#{self.target_id}>"
+
+

@@ -1,0 +1,169 @@
+channels:
+- username: '@sbmarketing'
+  title: News & Trends by Sber
+  topics:
+  - банки
+  - финтех
+  - ии
+  - клиентский сервис
+  - розница
+  active: true
+- username: '@blockchainRF'
+  title: Блокчейн / Web3 в России
+  topics:
+  - крипто / блокчейн
+  - регуляторика
+  - финтех
+  - платежи
+  active: true
+- username: '@ict_moscow_ai'
+  title: База знаний AI
+  topics:
+  - ии
+  - ит-инфраструктура
+  - обучение
+  active: true
+- username: '@abulaphia'
+  title: Innovation & Research
+  topics:
+  - ии
+  - финтех
+  - клиентский сервис
+  - маркетинг
+  active: true
+- username: '@sberpremiernew'
+  title: СберПремьер
+  topics:
+  - лайфстайл
+  - банки
+  active: false
+- username: '@disruptors_official'
+  title: Дизраптор
+  topics:
+  - финтех
+  - ии
+  - розница
+  - клиентский сервис
+  - маркетинг
+  active: true
+- username: '@fintechassociation'
+  title: Ассоциация ФинТех
+  topics:
+  - финтех
+  - банки
+  - платежи
+  - регуляторика
+  - биометрия
+  active: true
+- username: '@fintexno'
+  title: Финтехно
+  topics:
+  - финтех
+  - банки
+  - мировой рынок
+  active: true
+- username: '@telecommunal'
+  title: Телекоммуналка
+  topics:
+  - ии
+  - клиентский сервис
+  - маркетинг
+  - обучение
+  active: true
+- username: '@it2b_channel'
+  title: СофтТех
+  topics:
+  - финтех
+  - ии
+  - розница
+  - клиентский сервис
+  - маркетинг
+  active: true
+- username: '@biznetics'
+  title: Biznetics | AI для бизнеса
+  topics:
+  - финтех
+  - банки
+  - платежи
+  - регуляторика
+  - биометрия
+  active: true
+- username: '@marianna_danilina'
+  title: Про финтех и о жизни
+  topics:
+  - финтех
+  - стратегия
+  - банки
+  - цифровизация
+  active: true
+- username: '@bankiruofficial'
+  title: Банки.ру
+  topics:
+  - банки
+  - финансы
+  - маркетплейс
+  active: true
+- username: '@frank_media'
+  title: Frank Media
+  topics:
+  - банки
+  - финрынки
+  - технологии
+  active: true
+- username: '@cardreview'
+  title: Cardreview
+  topics:
+  - финтех
+  - банкинг
+  - ит
+  - розница
+  active: true
+- username: '@Fintrium'
+  title: Fintrium
+  topics:
+  - финтех
+  - банкинг
+  - блокчейн
+  - ии
+  active: true
+- username: '@alfacapital'
+  title: Альфа-Капитал
+  topics:
+  - инвестиции
+  - аналитика
+  active: true
+- username: '@vestnik_vr'
+  title: Вестник VR
+  topics:
+  - VR
+  - AR
+  - метавселенные
+  active: true
+- username: '@holographica'
+  title: Holographica
+  topics:
+  - VR
+  - AR
+  - метавселенные
+  active: true
+- username: '@letsdivein'
+  title: Let's Dive In
+  topics:
+  - VR
+  - технологии
+  active: true
+- username: '@VR_Journal'
+  title: VR Journal
+  topics:
+  - VR
+  - AR
+  - метавселенные
+  - ии
+  active: true
+- username: '@metatraveler'
+  title: Metatraveler
+  topics:
+  - метавселенные
+  - геймификация
+  - маркетинг
+  active: true

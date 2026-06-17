@@ -24,13 +24,18 @@ class Settings(BaseSettings):
     default_collect_days: int = 7
     # Минимальный балл релевантности новости.
     min_relevance_score: int = 30
-    # LLM-обогащение через Groq API.
+    # LLM провайдер: groq или ollama
     llm_enabled: bool = False
     llm_provider: str = "groq"
-    llm_api_key: str | None = ""
+    llm_api_key: str | None = None
+    llm_base_url: str = ""
     llm_model: str = "llama-3.3-70b-versatile"
-    llm_timeout: int = 60
-    llm_min_score: int = 20
+    llm_timeout: int = 120
+    llm_max_retries: int = 2
+    llm_min_score: int = 25
+    # Telegram-бот
+    bot_token: str = ""
+    bot_admin_secret: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

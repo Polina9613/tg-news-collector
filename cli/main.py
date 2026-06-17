@@ -233,27 +233,23 @@ def enrich(
     min_score: int = typer.Option(20, help="Мин. score для обогащения"),
     reprocess: bool = typer.Option(False, "--reprocess", help="Повторно обработать"),
 ) -> None:
-    """Структурировать карточки через LLM (Groq) → trend_cases."""
+    """Структурировать карточки через LLM → trend_cases."""
     _safe_setup_logging()
     settings = get_settings()
-    from llm.groq_provider import GroqProvider
     from llm.enricher import enrich_news_cards
+    from llm.factory import create_llm_provider
 
-    if not settings.llm_api_key:
-        typer.echo("✗ Не задан LLM_API_KEY в .env")
+    try:
+        provider = create_llm_provider(settings)
+    except Exception as e:
+        typer.echo(f"✗ Ошибка инициализации LLM: {e}")
         raise typer.Exit(code=1)
-
-    provider = GroqProvider(
-        api_key=settings.llm_api_key,
-        model=settings.llm_model,
-        timeout=settings.llm_timeout,
-    )
 
     if not provider.is_available():
-        typer.echo("✗ Groq API недоступен. Проверьте LLM_API_KEY и соединение.")
+        typer.echo(f"✗ {settings.llm_provider} недоступен — проверьте настройки.")
         raise typer.Exit(code=1)
 
-    typer.echo(f"Модель: {settings.llm_model} | Лимит: {limit} карточек")
+    typer.echo(f"Провайдер: {settings.llm_provider} | Модель: {settings.llm_model} | Лимит: {limit} карточек")
     result = enrich_news_cards(provider, min_score=min_score, limit=limit, reprocess=reprocess)
 
     typer.echo(f"""
@@ -283,23 +279,19 @@ def enrich_all(
     _safe_setup_logging()
     settings = get_settings()
 
-    if not settings.llm_api_key:
-        typer.echo("✗ Не задан LLM_API_KEY в .env")
-        raise typer.Exit(code=1)
-
     from db.base import get_session
     from db.models import NewsCard
     from llm.enricher import enrich_news_cards
-    from llm.groq_provider import GroqProvider
+    from llm.factory import create_llm_provider
 
-    provider = GroqProvider(
-        api_key=settings.llm_api_key,
-        model=settings.llm_model,
-        timeout=settings.llm_timeout,
-    )
+    try:
+        provider = create_llm_provider(settings)
+    except Exception as e:
+        typer.echo(f"✗ Ошибка инициализации LLM: {e}")
+        raise typer.Exit(code=1)
 
     if not provider.is_available():
-        typer.echo("✗ Groq API недоступен. Проверьте LLM_API_KEY.")
+        typer.echo(f"✗ {settings.llm_provider} недоступен — проверьте настройки.")
         raise typer.Exit(code=1)
 
     def count_pending() -> int:
@@ -392,21 +384,17 @@ def digest(
     """Сгенерировать Word-дайджест за период."""
     _safe_setup_logging()
     settings = get_settings()
-    from llm.groq_provider import GroqProvider
     from digest.generator import generate_digest
+    from llm.factory import create_llm_provider
 
-    if not settings.llm_api_key:
-        typer.echo("✗ Не задан LLM_API_KEY в .env")
+    try:
+        provider = create_llm_provider(settings)
+    except Exception as e:
+        typer.echo(f"✗ Ошибка инициализации LLM: {e}")
         raise typer.Exit(code=1)
 
-    provider = GroqProvider(
-        api_key=settings.llm_api_key,
-        model=settings.llm_model,
-        timeout=settings.llm_timeout,
-    )
-
     if not provider.is_available():
-        typer.echo("✗ Groq API недоступен. Проверьте LLM_API_KEY.")
+        typer.echo(f"✗ {settings.llm_provider} недоступен — проверьте настройки.")
         raise typer.Exit(code=1)
 
     typer.echo(f"Генерация дайджеста за {days} дней (макс. {max_cases} кейсов)...")
@@ -423,47 +411,41 @@ def digest(
 
 @app.command()
 def trends() -> None:
-    """Показать список трендов в базе знаний."""
+    """Показать все тренды в базе знаний с категориями."""
     _safe_setup_logging()
+    from itertools import groupby
     from sqlalchemy import func
 
     from db.base import get_session
     from db.models import Trend, TrendCase
 
-    with get_session() as session:
+    with get_session() as s:
         rows = (
-            session.query(
-                Trend.id,
-                Trend.name,
-                Trend.first_seen_at,
+            s.query(
+                Trend.id, Trend.name, Trend.category, Trend.status,
                 func.count(TrendCase.id).label("cnt"),
             )
             .outerjoin(TrendCase, TrendCase.trend_id == Trend.id)
             .group_by(Trend.id)
-            .order_by(func.count(TrendCase.id).desc())
+            .order_by(Trend.category, Trend.name)
             .all()
         )
-        data = [
-            (
-                row.id,
-                row.name,
-                row.first_seen_at.strftime("%b %Y") if row.first_seen_at else "—",
-                row.cnt,
-            )
-            for row in rows
-        ]
+        data = [(r.id, r.name, r.category or "—", r.status or "active", r.cnt) for r in rows]
 
     if not data:
-        typer.echo("Трендов нет. Запустите: python -m cli enrich")
+        typer.echo("Трендов нет. Запустите: python -m cli init-db")
         return
 
-    SEP = "─" * 56
-    typer.echo(f"── Тренды в базе знаний {'─' * 30}")
-    typer.echo(f"  {'ID':<4} {'Тренд':<32} {'Кейсов':<8} {'Первый кейс'}")
+    SEP = "─" * 80
+    typer.echo(f"\n{SEP}")
+    typer.echo(f"  {'ID':<4} {'Тренд':<40} {'Статус':<10} {'Кейсов':>6}")
     typer.echo(SEP)
-    for tid, name, first, cnt in data:
-        typer.echo(f"  {tid:<4} {name[:32]:<32} {cnt:<8} {first}")
+    for cat, group in groupby(sorted(data, key=lambda x: (x[2], x[1])), key=lambda x: x[2]):
+        typer.echo(f"\n  📂 {cat}")
+        for tid, name, _, status, cnt in group:
+            typer.echo(f"  {tid:<4} {name[:40]:<40} {status:<10} {cnt:>6}")
     typer.echo(SEP)
+    typer.echo(f"\n  Итого: {len(data)} трендов\n")
 
 
 @app.command()
@@ -590,3 +572,85 @@ def stats() -> None:
     """Показать статистику базы данных."""
     _safe_setup_logging()
     _print_stats(get_db_stats())
+
+
+@app.command(name="llm-check")
+def llm_check() -> None:
+    """Проверить доступность LLM-провайдера и работу всех методов."""
+    _safe_setup_logging()
+    settings = get_settings()
+    from llm.factory import create_llm_provider
+
+    try:
+        provider = create_llm_provider(settings)
+    except Exception as e:
+        typer.echo(f"✗ Ошибка инициализации: {e}")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Провайдер: {settings.llm_provider}")
+    typer.echo(f"Модель:    {settings.llm_model}")
+    if settings.llm_base_url:
+        typer.echo(f"URL:       {settings.llm_base_url}")
+
+    typer.echo("\nПроверяю доступность...")
+    if not provider.is_available():
+        typer.echo("✗ Провайдер недоступен.")
+        raise typer.Exit(code=1)
+    typer.echo("✓ Провайдер доступен.\n")
+
+    test_text = (
+        "Сбербанк запустил Face Pay в 500 банкоматах. "
+        "Технология позволяет снимать наличные по биометрии лица без карты. "
+        "Конверсия использования банкоматов выросла на 23%."
+    )
+
+    try:
+        typer.echo("1. Тест check_relevance...")
+        relevant, reason = provider.check_relevance(test_text)
+        typer.echo(f"   → relevant={relevant} | {reason}\n")
+
+        typer.echo("2. Тест classify_post...")
+        cls = provider.classify_post(test_text)
+        typer.echo(f"   → type={cls['type']} | cases={cls['case_count']} | {cls['reason']}\n")
+
+        typer.echo("3. Тест generate_summary...")
+        summary = provider.generate_summary(test_text)
+        typer.echo(f"   → {summary}\n")
+
+        typer.echo("4. Тест extract_cases...")
+        cases = provider.extract_cases(test_text, None)
+        typer.echo(f"   → найдено кейсов: {len(cases)}")
+        for c in cases[:2]:
+            typer.echo(f"     • {c.get('case_title')} ({c.get('company')}, {c.get('industry')})")
+        typer.echo("")
+
+        typer.echo("5. Тест assign_trend...")
+        from db.base import get_session
+        from db.models import Trend
+        with get_session() as s:
+            trend_list = [
+                {"id": t.id, "name": t.name, "description": t.description or "", "category": t.category or ""}
+                for t in s.query(Trend).filter(Trend.status == "active").limit(22).all()
+            ]
+        if cases and trend_list:
+            decision = provider.assign_trend(cases[0], trend_list)
+            typer.echo(
+                f"   → decision={decision['decision']} "
+                f"| trend_id={decision['trend_id']} "
+                f"| {decision['reasoning']}\n"
+            )
+        else:
+            typer.echo("   → пропущено (нет кейсов или трендов в БД)\n")
+
+        typer.echo("✓ Все методы работают.")
+    except Exception as e:
+        typer.echo(f"✗ Ошибка запроса: {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def bot() -> None:
+    """Запустить Telegram-бота."""
+    import asyncio
+    from bot.main import main
+    asyncio.run(main())

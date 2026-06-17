@@ -1,69 +1,76 @@
 # tg-news-collector
 
-Автоматическая система мониторинга Telegram-каналов для формирования
-корпоративного финтех-дайджеста. Собирает посты, классифицирует их
-по темам, структурирует в кейсы через LLM и генерирует еженедельный
-Word-дайджест для аналитиков.
+Автоматическая система мониторинга Telegram-каналов и формирования
+финтех-дайджеста с базой знаний трендов. Работает 24/7 без участия команды.
 
-## Что умеет система
+## Возможности
 
-- Собирает посты из публичных Telegram-каналов через Telethon
-- Очищает текст: убирает HTML, markdown, emoji
-- Определяет рекламные посты автоматически
-- Классифицирует по 18 темам и 60+ тегам через rule-based алгоритм
-- Извлекает упомянутые компании
-- Оценивает релевантность (score 0–100)
-- Через LLM (Groq): проверяет релевантность, пишет резюме,
-  структурирует кейсы в базу знаний трендов
-- Генерирует еженедельный Word-дайджест
-- Экспортирует всё в Excel для ручной проверки редактором
-- Дедуплицирует посты по channel + message_id
+- 🤖 **Telegram-бот** с двумя ролями: аналитик и администратор
+- 📡 **Автоматический сбор** из Telegram-каналов каждые 30 минут
+- 🧠 **Двухуровневая обработка**: rule-based + LLM (Groq или Ollama)
+- 📊 **База знаний трендов** с поиском по компании, теме, периоду
+- 📰 **Еженедельный Word-дайджест** для аналитиков по пятницам
+- ✏️ **Редактор кейсов** прямо в Telegram (FSM)
+- 📁 **Excel-экспорт** с цветовой кодировкой
+- 🔧 **Управление каналами** через бота без правки YAML
+- 📈 **85+ автотестов**, готов к продакшну
+
+## Архитектура
+
+```
+Telegram-каналы
+    ↓
+[Collector] Telethon — сбор постов в raw_posts
+    ↓
+[Processor] rule-based: очистка, темы, теги, релевантность
+    ↓                              → NewsCard
+[LLM Enricher] Groq/Ollama: структурирование в кейсы
+    ↓                              → TrendCase + Trend
+[Digest Generator] LLM компонует .docx
+    ↓
+[Telegram Bot] рассылка + поиск + редактирование
+```
 
 ## Стек
 
 | Компонент | Технология |
 |---|---|
 | Язык | Python 3.11+ |
-| Telegram | Telethon |
+| Telegram (сбор) | Telethon |
+| Telegram (бот) | aiogram 3.x |
+| Планировщик | APScheduler |
 | База данных | SQLite + SQLAlchemy 2.0 |
 | Настройки | Pydantic Settings |
-| LLM | Groq API (llama-3.3-70b-versatile) |
-| Экспорт Excel | pandas + openpyxl |
-| Экспорт Word | python-docx |
+| LLM | Groq API или Ollama |
+| Excel | pandas + openpyxl |
+| Word | python-docx |
 | CLI | typer |
 | Логи | loguru |
-| Тесты | pytest (72 теста) |
+| Тесты | pytest (85+ тестов) |
 
 ## Быстрый старт
 
-### 1. Клонировать и установить
+### 1. Установить
 
 ```bash
-git clone <url>
+git clone https://github.com/Polina9613/tg-news-collector.git
 cd tg-news-collector
 python3 -m venv .venv
-source .venv/bin/activate      # Linux/Mac
-# .venv\Scripts\activate       # Windows
+source .venv/bin/activate
 pip install -e .
 ```
 
-### 2. Получить Telegram API credentials
+### 2. Получить ключи
 
-1. Открыть https://my.telegram.org
-2. Войти под своим номером телефона
-3. Перейти в **API development tools**
-4. Создать приложение (App title: любое, Platform: Other)
-5. Скопировать `App api_id` и `App api_hash`
+**Telegram API** — на https://my.telegram.org → API development tools → Create application
 
-### 3. Получить Groq API key
+**LLM на выбор:**
+- **Groq** (облако, бесплатно) — на https://console.groq.com → API Keys
+- **Ollama** (свой сервер) — `ollama pull qwen2.5:14b` на сервере с GPU
 
-1. Зарегистрироваться на https://console.groq.com
-2. Перейти в **API Keys** → **Create API Key**
-3. Скопировать ключ (начинается с `gsk_`)
+**Telegram-бот** — у @BotFather → `/newbot`
 
-Бесплатный тариф: 30 запросов/минуту, достаточно для работы.
-
-### 4. Настроить конфигурацию
+### 3. Настроить
 
 ```bash
 cp .env.example .env
@@ -72,239 +79,211 @@ cp sources.example.yaml sources.yaml
 
 Заполнить `.env`:
 ```env
+# Telegram сбор
 TELEGRAM_API_ID=12345678
-TELEGRAM_API_HASH=abcdef1234567890abcdef1234567890
+TELEGRAM_API_HASH=xxx
 TELEGRAM_PHONE=+79001234567
-TELEGRAM_SESSION_NAME=tg_news
-DB_PATH=data/tg_news.db
-SOURCES_FILE=sources.yaml
-LOG_LEVEL=INFO
-DEFAULT_COLLECT_DAYS=7
-MIN_RELEVANCE_SCORE=25
-LLM_ENABLED=true
+
+# Telegram бот
+BOT_TOKEN=ваш_токен_от_botfather
+BOT_ADMIN_SECRET=любое_длинное_кодовое_слово
+
+# LLM (один из двух вариантов)
 LLM_PROVIDER=groq
-LLM_API_KEY=gsk_ваш_ключ
+LLM_API_KEY=gsk_xxx
 LLM_MODEL=llama-3.3-70b-versatile
-LLM_TIMEOUT=60
-LLM_MIN_SCORE=25
+
+# ИЛИ для Ollama
+# LLM_PROVIDER=ollama
+# LLM_BASE_URL=http://your-server:11434
+# LLM_MODEL=qwen2.5:14b
 ```
 
-Заполнить `sources.yaml` — список Telegram-каналов для мониторинга:
-```yaml
-channels:
-  - username: "@fintechassociation"
-    title: "Ассоциация ФинТех"
-    topics: ["финтех", "банки", "платежи", "регуляторика"]
-    active: true
-
-  - username: "@blockchainRF"
-    title: "Блокчейн / Web3 в России"
-    topics: ["крипто / блокчейн", "регуляторика", "финтех"]
-    active: true
-```
-
-### 5. Инициализировать базу и запустить
+### 4. Запустить
 
 ```bash
+# Создать базу
 python -m cli init-db
-python -m cli collect --days 7
-python -m cli process
-python -m cli enrich-all --min-score 25 --batch-size 5 --pause 180
-python -m cli digest --days 7
-python -m cli export
+
+# Первая авторизация в Telegram (ввод SMS-кода)
+python -m cli collect --days 1
+
+# Проверить что LLM работает
+python -m cli llm-check
+
+# Запустить бота — он сам будет всё делать дальше
+python -m cli bot
 ```
 
-После первого запуска `collect` Telegram попросит ввести код из SMS.
-После ввода создаётся файл `tg_news.session` — он сохраняет авторизацию.
-Повторный ввод кода не потребуется.
+В Telegram открыть своего бота → `/start` → `/admin ваше_кодовое_слово`
+
+## Роли пользователей
+
+| Роль | Как получить | Что доступно |
+|---|---|---|
+| Аналитик | Автоматически при `/start` | Поиск, тренды, Excel, дайджест |
+| Администратор | `/admin <кодовое_слово>` или `/promote @user` | Всё + редактор кейсов, каналы, пользователи |
+
+## Что делает бот автоматически
+
+| Время | Что происходит |
+|---|---|
+| Каждые 30 минут | Собирает новые посты → обрабатывает → обогащает LLM |
+| Пятница 16:00 | Отправляет админам Excel за неделю на финальную проверку |
+| Пятница 18:00 | Генерирует и рассылает дайджест всем пользователям |
+
+## Команды бота
+
+### Для аналитика
+- `/start /menu /help`
+- `/search <текст>` — поиск по подстроке в кейсах
+- `/company <название>` — кейсы по компании
+- `/topic <тема> [дней]` — кейсы по теме за период
+- `/trends /trend <id> /search_trend <id>` — работа с трендами
+- `/export 7|30|all` — Excel-выгрузка
+- `/digest_now` — последний дайджест
+- `/stats` — статистика
+- `/excel_guide /user_guide` — описание Excel и руководство
+
+### Для админа (дополнительно)
+- `/review /add` — редактор кейсов с FSM
+- `/channels /add_channel /toggle_channel /remove_channel`
+- `/users /promote /demote /admin`
+- `/collect /process /enrich` — ручной запуск парсера
+- `/digest` — сгенерировать дайджест вручную
+- `/broadcast_digest` — ручная рассылка
+
+Подробное руководство для пользователей: `docs/user_guide.docx`
+
+## CLI-команды
+
+В продакшене запускается только `python -m cli bot` — бот сам делает остальное. CLI нужно для разработки, тестов и форс-мажоров.
+
+| Команда | Описание |
+|---|---|
+| `python -m cli bot` | Запустить Telegram-бота (продакшн) |
+| `python -m cli init-db` | Создать/обновить БД и применить миграции |
+| `python -m cli collect --days 7` | Собрать посты вручную |
+| `python -m cli process` | Обработать сырые посты |
+| `python -m cli enrich-all --batch-size 5 --pause 180` | LLM-обогащение всех |
+| `python -m cli digest --days 7` | Сгенерировать дайджест |
+| `python -m cli export` | Экспорт в Excel |
+| `python -m cli stats` | Статистика базы |
+| `python -m cli trends` | Список трендов |
+| `python -m cli search --query "биометрия"` | Поиск кейсов |
+| `python -m cli llm-check` | Проверить LLM-провайдер |
 
 ## Структура проекта
 
 ```
 tg-news-collector/
-├── config/
-│   └── settings.py          # Настройки через Pydantic (читает .env)
-├── db/
-│   ├── models.py             # Модели: Source, RawPost, NewsCard,
-│   │                         #         TrendCase, Trend
-│   ├── base.py               # SQLAlchemy engine, get_session()
-│   └── init_db.py            # init_db(), get_db_stats(), миграции
-├── collector/
-│   ├── telegram.py           # TelegramCollector (Telethon)
-│   └── sources_loader.py     # Загрузка sources.yaml
-├── processor/
-│   ├── cleaner.py            # clean_text(), extract_title()
-│   ├── ads.py                # detect_ad()
-│   ├── tagger.py             # assign_topics(), assign_tags(),
-│   │                         # extract_companies()
-│   ├── relevance.py          # compute_relevance() → score 0-100
-│   ├── card_builder.py       # build_news_card()
-│   ├── dedup.py              # is_duplicate()
-│   └── pipeline.py           # process_raw_posts(), reprocess_all_cards()
-├── llm/
-│   ├── groq_provider.py      # Groq API клиент
-│   ├── enricher.py           # enrich_news_cards() — LLM-обогащение
-│   ├── trend_matcher.py      # get_or_create_trend() — база знаний
-│   └── base.py               # BaseLLMProvider (ABC)
-├── digest/
-│   ├── generator.py          # generate_digest() → .docx
-│   └── llm_digest.py         # Промпты: top5, facts, topic_intro
-├── exporter/
-│   └── excel.py              # export_to_excel() → .xlsx
-├── cli/
-│   └── main.py               # Все CLI-команды (typer)
-├── tests/                    # 72 теста pytest
-├── scripts/
-│   └── test_pipeline.py      # Тест на синтетических данных
+├── config/             # Настройки (Pydantic)
+├── db/                 # Модели SQLAlchemy + миграции
+├── collector/          # Сбор из Telegram (Telethon)
+├── processor/          # Rule-based обработка
+├── llm/                # Groq и Ollama провайдеры
+├── digest/             # Генератор Word-дайджеста
+├── exporter/           # Excel-экспорт
+├── bot/                # Telegram-бот (aiogram)
+│   ├── handlers/       # 8 роутеров
+│   ├── scheduler.py    # Auto pipeline + рассылки
+│   ├── menu.py         # Меню по ролям
+│   └── ...
+├── cli/                # CLI-команды (typer)
+├── tests/              # 85+ тестов
+├── scripts/            # Утилиты
 ├── docs/
-│   ├── excel_guide.md        # Как читать Excel-экспорт
-│   └── server_setup.md       # Деплой на сервер
-├── data/                     # Gitignored
-│   ├── tg_news.db            # База данных SQLite
-│   ├── exports/              # Excel-файлы
-│   └── digests/              # Word-дайджесты
-├── .env.example              # Шаблон переменных окружения
-├── sources.example.yaml      # Пример списка каналов
-└── pyproject.toml            # Зависимости и настройки инструментов
+│   ├── server_setup.md # Деплой на сервер
+│   ├── user_guide.docx # Руководство пользователя
+│   └── excel_guide.md
+└── data/               # БД, экспорты, дайджесты (gitignored)
 ```
 
 ## Модели данных
 
 ```
-Source          — Telegram-каналы из sources.yaml
-RawPost         — Сырые посты как есть из Telegram
-NewsCard        — Обработанная карточка новости
-TrendCase       — Структурированный кейс от LLM
-Trend           — Тренд как сущность базы знаний
+Source         — Telegram-каналы из sources.yaml
+RawPost        — Сырые посты как есть
+NewsCard       — Обработанная карточка
+TrendCase      — Структурированный кейс от LLM
+Trend          — Тренд как сущность базы знаний
+BotUser        — Пользователи бота (analyst / admin)
+AuditLog       — Лог всех действий
 ```
 
-Связи:
+## Поиск
+
+| Команда | Где ищет | Тип сравнения |
+|---|---|---|
+| `/search` | name + description + value + how_it_works + company + trend_name | Подстрока, регистронезависимо |
+| `/company` | поле company | Подстрока, регистронезависимо |
+| `/topic` | темы поста + теги + название тренда | Подстрока, регистронезависимо |
+
+`/search цифр` найдёт «цифровой рубль», «цифровизация», «оцифровка». `/company сбер` найдёт «Сбербанк».
+
+## LLM-провайдеры
+
+Переключение одной строкой в `.env`:
+
+### Groq (по умолчанию)
+```env
+LLM_PROVIDER=groq
+LLM_API_KEY=gsk_xxx
+LLM_MODEL=llama-3.3-70b-versatile
 ```
-Source → (1:N) → RawPost → (1:1) → NewsCard → (1:N) → TrendCase → (N:1) → Trend
+Бесплатно, 30 запросов/мин.
+
+### Ollama (свой сервер)
+```env
+LLM_PROVIDER=ollama
+LLM_BASE_URL=http://your-server:11434
+LLM_MODEL=qwen2.5:14b
 ```
+Без лимитов, данные не уходят наружу.
 
-## CLI-команды
-
-### Основные
-
-| Команда | Описание |
-|---|---|
-| `python -m cli init-db` | Создать/обновить базу данных |
-| `python -m cli collect --days 7` | Собрать посты за N дней |
-| `python -m cli collect --channel @name` | Один канал |
-| `python -m cli process` | Обработать посты → карточки |
-| `python -m cli reprocess` | Пересчитать все карточки |
-| `python -m cli enrich --limit 10` | LLM-обогащение N карточек |
-| `python -m cli enrich-all --batch-size 5 --pause 180` | Обогатить все |
-| `python -m cli digest --days 7` | Сгенерировать Word-дайджест |
-| `python -m cli export` | Экспорт в Excel |
-| `python -m cli stats` | Статистика базы |
-
-### База знаний трендов
-
-| Команда | Описание |
-|---|---|
-| `python -m cli trends` | Список всех трендов |
-| `python -m cli trend-info --id 1` | Детали тренда |
-| `python -m cli search --query "биометрия"` | Поиск по тексту |
-| `python -m cli search --company "Сбер"` | Поиск по компании |
-| `python -m cli search --period 2026-Q2` | Поиск по периоду |
-
-### Автоматизация
-
-| Команда | Описание |
-|---|---|
-| `python -m cli run-daily` | collect + process + export за 1 день |
-| `python -m cli watch --interval 30` | Непрерывный режим (для сервера) |
-| `python -m cli digest-weekly` | Еженедельный дайджест по расписанию |
-
-## Как работает пайплайн
-
-```
-Telegram-канал
-    ↓
-[Collector] Telethon забирает посты, сохраняет в raw_posts
-    ↓
-[Processor]
-    clean_text()       — убирает HTML, markdown, emoji
-    detect_ad()        — маркеры рекламы (#реклама, erid, ООО)
-    extract_title()    — первая содержательная строка
-    assign_topics()    — 18 тем по словарям ключевых слов
-    assign_tags()      — 60+ тегов
-    extract_companies()— список компаний из текста
-    compute_relevance()— score 0-100, label high/medium/low/irrelevant
-    → NewsCard в БД
-    ↓
-[LLM Enricher] — только для карточек с score >= 25
-    check_relevance()  — LLM подтверждает релевантность
-    generate_summary() — резюме 2-3 предложения для сайта
-    extract_cases()    — структурированные кейсы
-    get_or_create_trend() — привязка к тренду в базе знаний
-    → TrendCase + Trend в БД
-    ↓
-[Digest Generator] — раз в неделю
-    get_top5()         — топ-5 новостей через LLM
-    get_facts()        — числовые факты через LLM
-    get_topic_intro()  — вводный абзац к каждой теме
-    → .docx файл
-    ↓
-[Exporter]
-    → .xlsx файл (листы: news_cards, review, trend_cases, trends, raw_posts)
-```
-
-## Цветовая кодировка Excel
-
-| Цвет | Значение |
-|---|---|
-| Жёлтый | Рекламный пост — требует проверки перед публикацией |
-| Зелёный | Высокая релевантность (score >= 60) |
-| Серый | Низкая релевантность |
-
-## Статусы карточек
-
-| Статус | Значение |
-|---|---|
-| `auto` | Обработано автоматически |
-| `needs_review` | Требует ручной проверки (реклама или score < 10) |
-| `approved` | Одобрено редактором |
-| `rejected` | Отклонено редактором |
+Подробнее в `docs/server_setup.md`.
 
 ## Деплой на сервер
 
-Подробная инструкция в `docs/server_setup.md`.
+См. `docs/server_setup.md` — три варианта: screen, cron, systemd.
 
-Краткий вариант через cron:
+Рекомендуемый — systemd, который автоматически перезапускает бота при падении.
+
+Минимум команд:
 ```bash
-# Каждые 30 минут — сбор новых постов
-*/30 * * * * cd /path/to/project && .venv/bin/python -m cli collect --days 0.1 && .venv/bin/python -m cli process && .venv/bin/python -m cli enrich --limit 5 --min-score 25
-
-# Каждую пятницу в 17:00 — еженедельный дайджест
-0 17 * * 5 cd /path/to/project && .venv/bin/python -m cli digest-weekly
+git clone <repo>
+cd tg-news-collector
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+# Положить .env и sources.yaml
+python -m cli init-db
+python -m cli collect --days 1  # авторизация Telegram
+# Настроить systemd из docs/server_setup.md
+sudo systemctl enable --now tg-news
 ```
 
 ## Тесты
 
 ```bash
-pytest tests/ -v        # запустить все тесты
-pytest tests/ -v -k cleaner   # только тесты cleaner
+pytest tests/ -v
 ```
 
-Тесты работают без Telegram и без заполненного .env.
-Покрытие: cleaner, ads, tagger, relevance, dedup, card_builder, exporter.
+85+ тестов, работают без Telegram и LLM.
 
-## Известные ограничения
+## Документация
 
-- Только публичные Telegram-каналы
-- Groq бесплатный тариф: 30 запросов/мин → при большом объёме
-  используйте `--batch-size 5 --pause 180`
-- При первом запуске требуется ввод кода из Telegram
-- Файл `.session` нельзя коммитить в git (уже в .gitignore)
+| Файл | Для кого |
+|---|---|
+| `README.md` | Разработчики и девопсы |
+| `docs/user_guide.docx` | Пользователи бота — аналитики |
+| `docs/server_setup.md` | Деплой |
+| `docs/excel_guide.md` | Описание Excel |
 
 ## Roadmap
 
 - [ ] Streamlit веб-интерфейс для редактора
-- [ ] RSS и веб-источники
-- [ ] Telegram-бот для рассылки дайджеста
-- [ ] Квартальные отчёты по трендам
+- [ ] RSS и веб-источники (не только Telegram)
+- [ ] Квартальные отчёты по динамике трендов
 - [ ] Полнотекстовый поиск (SQLite FTS5)
-- [ ] Поддержка GigaChat / YandexGPT
+- [ ] PostgreSQL для больших объёмов

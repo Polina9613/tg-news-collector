@@ -29,8 +29,12 @@ def load_sources(path: str) -> list[dict]:
 
 
 def sync_sources_to_db(sources: list[dict]) -> None:
+    """Синхронизирует список каналов из YAML в таблицу sources.
+    Добавляет новые источники, обновляет topics и is_active у существующих.
+    """
     with get_session() as session:
         for src in sources:
+            topics_json = json.dumps(src.get("topics", []), ensure_ascii=False)
             existing = session.execute(
                 select(Source).where(Source.username == src["username"])
             ).scalar_one_or_none()
@@ -38,8 +42,13 @@ def sync_sources_to_db(sources: list[dict]) -> None:
                 source = Source(
                     username=src["username"],
                     title=src.get("title", src["username"]),
-                    topics=json.dumps(src.get("topics", []), ensure_ascii=False),
+                    topics=topics_json,
                     is_active=src.get("active", True),
                 )
                 session.add(source)
                 logger.info(f"Added new source to DB: {src['username']}")
+            else:
+                existing.topics = topics_json
+                existing.is_active = src.get("active", True)
+                if src.get("title"):
+                    existing.title = src["title"]

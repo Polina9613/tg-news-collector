@@ -56,6 +56,12 @@ _TRENDS_WIDTHS: dict[str, int] = {
     "A": 6, "B": 35, "C": 60, "D": 10, "E": 15, "F": 15,
 }
 
+_BY_CHANNEL_COLS = ["Канал", "Постов", "Кейсов", "Средний score", "Рекламных постов"]
+
+_BY_CHANNEL_WIDTHS: dict[str, int] = {
+    "A": 35, "B": 10, "C": 10, "D": 14, "E": 18,
+}
+
 _COLOR_AD = "FFEB9C"
 _COLOR_HIGH = "C6EFCE"
 _COLOR_LOW = "F2F2F2"
@@ -220,9 +226,10 @@ def _post_to_row(post: RawPost, has_card: bool) -> dict:
 
 
 def _case_to_row(case: TrendCase) -> dict:
+    nc = case.news_card
     return {
-        "Дата": _fmt_dt(case.news_card.published_at),
-        "Источник": case.news_card.source_title or "",
+        "Дата": _fmt_dt(nc.published_at) if nc else "",
+        "Источник": nc.source_title or "" if nc else "",
         "Тренд": case.trend_name or "",
         "Кейс": case.case_title or "",
         "Компания": case.company or "",
@@ -231,7 +238,7 @@ def _case_to_row(case: TrendCase) -> dict:
         "Ценность": case.value or "",
         "Рынок": case.market or "",
         "Ссылка": "Открыть" if case.source_url else "",
-        "Заголовок поста": case.news_card.title or "",
+        "Заголовок поста": nc.title or "" if nc else "",
         "Тренд ID": case.trend_id or "",
         "Период": case.period_label or "",
         "_url": case.source_url or "",
@@ -252,6 +259,38 @@ def _trend_to_row(trend: Trend, cases_count: int) -> dict:
 def _rows_to_df(rows: list[dict], cols: list[str]) -> pd.DataFrame:
     public = [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]
     return pd.DataFrame(public, columns=cols)
+
+
+def _build_by_channel_rows(
+    cards_rows: list[dict], cases_rows: list[dict]
+) -> list[dict]:
+    from collections import defaultdict
+
+    stats: dict = defaultdict(lambda: {"posts": 0, "cases": 0, "scores": [], "ads": 0})
+    for row in cards_rows:
+        ch = row.get("Источник") or "—"
+        stats[ch]["posts"] += 1
+        score = row.get("Релевантность")
+        if score:
+            stats[ch]["scores"].append(score)
+        if row.get("Реклама"):
+            stats[ch]["ads"] += 1
+    for row in cases_rows:
+        ch = row.get("Источник") or "—"
+        stats[ch]["cases"] += 1
+
+    return [
+        {
+            "Канал": ch,
+            "Постов": s["posts"],
+            "Кейсов": s["cases"],
+            "Средний score": (
+                round(sum(s["scores"]) / len(s["scores"]), 1) if s["scores"] else 0
+            ),
+            "Рекламных постов": s["ads"],
+        }
+        for ch, s in sorted(stats.items(), key=lambda x: x[1]["cases"], reverse=True)
+    ]
 
 
 # --- Main export function -----------------------------------------------------
@@ -316,10 +355,13 @@ def export_to_excel(output_path: str | None = None) -> str:
         cases_rows = [_case_to_row(c) for c in cases]
         trends_rows = [_trend_to_row(t, trend_case_counts.get(t.id, 0)) for t in all_trends]
 
+    by_channel_rows = _build_by_channel_rows(cards_rows, cases_rows)
+
     logger.info(
         f"Rows: news_cards={len(cards_rows)},"
         f" raw_posts={len(posts_rows)}, review={len(review_rows)},"
-        f" trend_cases={len(cases_rows)}, trends={len(trends_rows)}"
+        f" trend_cases={len(cases_rows)}, trends={len(trends_rows)},"
+        f" by_channel={len(by_channel_rows)}"
     )
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
@@ -337,6 +379,9 @@ def export_to_excel(output_path: str | None = None) -> str:
         )
         _rows_to_df(trends_rows, _TRENDS_COLS).to_excel(
             writer, sheet_name="trends", index=False
+        )
+        _rows_to_df(by_channel_rows, _BY_CHANNEL_COLS).to_excel(
+            writer, sheet_name="by_channel", index=False
         )
 
         _format_sheet(
@@ -381,6 +426,11 @@ def export_to_excel(output_path: str | None = None) -> str:
             _TRENDS_WIDTHS,
             wrap_col_idxs=[3],
             wrap_height=80,
+        )
+        _format_sheet(
+            writer.sheets["by_channel"],
+            by_channel_rows,
+            _BY_CHANNEL_WIDTHS,
         )
 
     logger.info(f"Export complete: {output_path}")
