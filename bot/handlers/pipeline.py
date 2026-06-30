@@ -155,7 +155,26 @@ async def cmd_enrich(message: Message) -> None:
 
         settings = get_settings()
         provider = create_llm_provider(settings)
-        return enrich_news_cards(provider, min_score=settings.llm_min_score, limit=limit)
+
+        fallback = None
+        if settings.llm_provider == "yandex" and settings.llm_api_key:
+            try:
+                from llm.groq_provider import GroqProvider
+                fallback = GroqProvider(
+                    api_key=settings.llm_api_key,
+                    model="llama-3.3-70b-versatile",
+                    timeout=settings.llm_timeout,
+                )
+                logger.info("Groq configured as fallback provider")
+            except Exception:
+                pass
+
+        return enrich_news_cards(
+            provider,
+            min_score=settings.llm_min_score,
+            limit=limit,
+            fallback_provider=fallback,
+        )
 
     try:
         result = await asyncio.to_thread(_enrich)
@@ -262,7 +281,7 @@ async def cmd_export(message: Message) -> None:
         ts = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
         suffix = f"_{days}d" if days else "_all"
         path = f"data/exports/bot_export{suffix}_{ts}.xlsx"
-        return export_to_excel(output_path=path)
+        return export_to_excel(output_path=path, days=days)
 
     try:
         path = await asyncio.to_thread(_export)

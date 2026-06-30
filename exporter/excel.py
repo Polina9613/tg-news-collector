@@ -1,5 +1,6 @@
 import json
-from datetime import datetime
+from collections import Counter
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -7,7 +8,7 @@ from loguru import logger
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
-from sqlalchemy import func, select
+from sqlalchemy import or_, select
 
 from db.base import get_session
 from db.models import NewsCard, RawPost, Trend, TrendCase
@@ -296,57 +297,66 @@ def _build_by_channel_rows(
 # --- Main export function -----------------------------------------------------
 
 
-def export_to_excel(output_path: str | None = None) -> str:
+def export_to_excel(output_path: str | None = None, days: int | None = None) -> str:
     """
     Экспортирует данные из БД в Excel.
-    Возвращает путь к созданному файлу.
-    output_path — если None, генерирует имя автоматически:
-    data/exports/news_export_YYYYMMDD_HHMMSS.xlsx
+    days — если задан, фильтрует news_cards, raw_posts и trend_cases за последние N дней.
+    output_path — если None, генерирует имя автоматически.
     """
     if output_path is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = f"data/exports/news_export_{ts}.xlsx"
 
+    since: datetime | None = None
+    if days is not None:
+        since = datetime.utcnow() - timedelta(days=days)
+
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Starting export → {output_path}")
+    logger.info(f"Starting export → {output_path}" + (f" (last {days}d)" if days else ""))
 
     with get_session() as session:
-        cards = session.execute(
-            select(NewsCard).order_by(NewsCard.id)
-        ).scalars().all()
+        cards_stmt = select(NewsCard).order_by(NewsCard.id)
+        if since:
+            cards_stmt = cards_stmt.where(
+                or_(NewsCard.published_at >= since, NewsCard.created_at >= since)
+            )
+        cards = session.execute(cards_stmt).scalars().all()
 
-        posts = session.execute(
-            select(RawPost).order_by(RawPost.id)
-        ).scalars().all()
+        posts_stmt = select(RawPost).order_by(RawPost.id)
+        if since:
+            posts_stmt = posts_stmt.where(RawPost.published_at >= since)
+        posts = session.execute(posts_stmt).scalars().all()
 
         processed_ids: set[int] = set(
             session.execute(select(NewsCard.raw_post_id)).scalars().all()
         )
 
-        review_cards = session.execute(
+        review_stmt = (
             select(NewsCard)
             .where(
                 NewsCard.review_status.in_(["auto", "needs_review"]),
                 NewsCard.publish_status == "draft",
             )
-            .order_by(NewsCard.relevance_score.desc(), NewsCard.published_at.desc())
-        ).scalars().all()
+        )
+        if since:
+            review_stmt = review_stmt.where(
+                or_(NewsCard.published_at >= since, NewsCard.created_at >= since)
+            )
+        review_stmt = review_stmt.order_by(
+            NewsCard.relevance_score.desc(), NewsCard.published_at.desc()
+        )
+        review_cards = session.execute(review_stmt).scalars().all()
 
-        cases = session.execute(
-            select(TrendCase).order_by(TrendCase.id)
-        ).scalars().all()
+        cases_stmt = select(TrendCase).order_by(TrendCase.id)
+        if since:
+            cases_stmt = cases_stmt.where(TrendCase.created_at >= since)
+        cases = session.execute(cases_stmt).scalars().all()
 
         all_trends = session.execute(
             select(Trend).order_by(Trend.first_seen_at.desc())
         ).scalars().all()
 
-        trend_case_counts: dict[int, int] = dict(
-            session.execute(
-                select(TrendCase.trend_id, func.count(TrendCase.id))
-                .where(TrendCase.trend_id.is_not(None))
-                .group_by(TrendCase.trend_id)
-            ).all()
-        )
+        trend_case_counts = Counter(c.trend_id for c in cases if c.trend_id is not None)
 
         # Build rows while session is still open — objects are still attached.
         cards_rows = [_card_to_row(c) for c in cards]

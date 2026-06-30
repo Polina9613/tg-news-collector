@@ -167,3 +167,85 @@ channels:
   - геймификация
   - маркетинг
   active: true
+
+rss_sources:
+- username: '@cbr_rss'
+  title: Банк России — новости
+  feed_url: https://www.cbr.ru/rss/RssFeed.ashx?tagid=7
+  fetch_full_text: false
+  topics:
+  - регуляторика
+  - банки
+  - платежи
+  active: true
+- username: '@finextra_rss'
+  title: Finextra
+  feed_url: https://www.finextra.com/finextra-rss.xml
+  fetch_full_text: false
+  topics:
+  - финтех
+  - мировой рынок
+  - банки
+  active: true
+- username: '@paymentsdive_rss'
+  title: Payments Dive
+  feed_url: https://www.paymentsdive.com/feeds/news/
+  fetch_full_text: false
+  topics:
+  - платежи
+  - финтех
+  - мировой рынок
+  active: true
+- username: '@techcrunch_fintech_rss'
+  title: TechCrunch Fintech
+  feed_url: https://techcrunch.com/category/fintech/feed/
+  fetch_full_text: false
+  topics:
+  - финтех
+  - мировой рынок
+  - ии
+  active: true
+- username: '@pymnts_rss'
+  title: PYMNTS
+  feed_url: https://www.pymnts.com/feed/
+  fetch_full_text: false
+  topics:
+  - платежи
+  - финтех
+  - мировой рынок
+  active: true
+- username: '@bankingtech_rss'
+  title: Banking Technology
+  feed_url: https://www.bankingtech.com/feed/
+  fetch_full_text: false
+  topics:
+  - финтех
+  - банки
+  - технологии
+  active: true
+- username: '@fintechfutures_rss'
+  title: Fintech Futures
+  feed_url: https://www.fintechfutures.com/feed/
+  fetch_full_text: false
+  topics:
+  - финтех
+  - мировой рынок
+  - банки
+  active: true
+- username: '@coindesk_rss'
+  title: CoinDesk
+  feed_url: https://www.coindesk.com/arc/outboundfeeds/rss/
+  fetch_full_text: false
+  topics:
+  - крипто
+  - блокчейн
+  - цифровые активы
+  active: true
+
+pdf_channels:
+- username: '@expertosphere'
+  title: Expertosphere
+  active: true
+- username: '@businessincognita'
+  title: Business Incognita
+  active: true

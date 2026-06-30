@@ -1,6 +1,6 @@
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 from loguru import logger
 
 from bot.audit import log_action
@@ -147,6 +147,23 @@ async def cmd_broadcast_digest(message: Message) -> None:
     await send_weekly_digest_to_all(message.bot)
     await message.answer("Рассылка завершена. Подробности в логах.")
 
+
+
+@router.callback_query(F.data.startswith("pdf:yes:"))
+async def handle_pdf_yes(call: CallbackQuery) -> None:
+    parts = call.data.split(":", 2)
+    filename = parts[2] if len(parts) > 2 else "unknown.pdf"
+    await call.message.edit_text(
+        f"✅ <b>PDF отмечен для обработки:</b> <code>{filename}</code>\n\n"
+        "Загрузите файл вручную в базу знаний или передайте аналитику."
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "pdf:no")
+async def handle_pdf_no(call: CallbackQuery) -> None:
+    await call.message.edit_text("❌ PDF пропущен.")
+    await call.answer()
 
 
 @router.message(Command("users"))

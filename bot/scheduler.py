@@ -53,10 +53,27 @@ async def auto_pipeline_cycle(bot: Bot) -> None:
         results = await asyncio.to_thread(_collect)
         total_saved = sum(r.saved for r in results)
         logger.info(f"[auto] collect: saved {total_saved} new posts")
+
+        for r in results:
+            for pdf_info in r.pdf_posts:
+                from collector.pdf_notifier import notify_admins_about_pdf
+                await notify_admins_about_pdf(bot=bot, **pdf_info)
     except Exception as e:
         logger.error(f"[auto] collect failed: {e}")
         await _notify_admins(bot, f"⚠️ Авто-сбор упал: {e}")
         return
+
+    def _collect_rss():
+        from collector.rss_pipeline import collect_rss_all
+        return collect_rss_all(days=2 / 24)
+
+    try:
+        rss_results = await asyncio.to_thread(_collect_rss)
+        rss_saved = sum(r.saved for r in rss_results)
+        total_saved += rss_saved
+        logger.info(f"[auto] RSS collect: saved {rss_saved} new articles")
+    except Exception as e:
+        logger.warning(f"[auto] RSS collect failed: {e}")
 
     if total_saved == 0:
         logger.info("[auto] No new posts, skipping process/enrich")
@@ -80,7 +97,25 @@ async def auto_pipeline_cycle(bot: Bot) -> None:
         from llm.factory import create_llm_provider
         settings = get_settings()
         provider = create_llm_provider(settings)
-        return enrich_news_cards(provider, min_score=settings.llm_min_score, limit=5)
+
+        fallback = None
+        if settings.llm_provider == "yandex" and settings.llm_api_key:
+            try:
+                from llm.groq_provider import GroqProvider
+                fallback = GroqProvider(
+                    api_key=settings.llm_api_key,
+                    model="llama-3.3-70b-versatile",
+                    timeout=settings.llm_timeout,
+                )
+            except Exception:
+                pass
+
+        return enrich_news_cards(
+            provider,
+            min_score=settings.llm_min_score,
+            limit=5,
+            fallback_provider=fallback,
+        )
 
     try:
         enrich_result = await asyncio.to_thread(_enrich)
@@ -102,7 +137,7 @@ async def friday_review_handoff(bot: Bot) -> None:
     def _export():
         from exporter.excel import export_to_excel
         ts = datetime.utcnow().strftime("%Y%m%d")
-        return export_to_excel(output_path=f"data/exports/review_{ts}.xlsx")
+        return export_to_excel(output_path=f"data/exports/review_{ts}.xlsx", days=7)
 
     try:
         path = await asyncio.to_thread(_export)

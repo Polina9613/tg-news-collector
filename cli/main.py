@@ -192,11 +192,39 @@ def reprocess() -> None:
 @app.command()
 def export(
     output: str | None = typer.Option(None, "--output", help="Путь к .xlsx файлу"),
+    days: int | None = typer.Option(None, "--days", "-d", help="За сколько дней (по умолчанию — всё время)"),
 ) -> None:
     """Экспортировать данные из БД в Excel."""
     _safe_setup_logging()
-    path = export_to_excel(output_path=output)
+    path = export_to_excel(output_path=output, days=days)
     typer.echo(f"✓ Экспорт завершён: {path}")
+
+
+@app.command("collect-rss")
+def collect_rss_cmd(
+    days: float = typer.Option(7.0, "--days", "-d", help="За сколько дней собирать"),
+) -> None:
+    """Собрать статьи из RSS-лент (из rss_sources в sources.yaml)."""
+    _safe_setup_logging()
+    settings = get_settings()
+    _check_sources_file(settings.sources_file)
+
+    from collector.rss_pipeline import collect_rss_all
+
+    results = collect_rss_all(days=days)
+    if not results:
+        typer.echo("Нет активных RSS-источников.")
+        return
+
+    total = sum(r.saved for r in results)
+    typer.echo("RSS-сбор завершён:")
+    for r in results:
+        typer.echo(
+            f"  {r.source_username}: "
+            f"+{r.saved} новых | дублей {r.skipped_duplicate} | "
+            f"пустых {r.skipped_empty} | ошибок {r.errors}"
+        )
+    typer.echo(f"\nИтого: {total} новых статей")
 
 
 @app.command("run-daily")
@@ -588,9 +616,15 @@ def llm_check() -> None:
         raise typer.Exit(code=1)
 
     typer.echo(f"Провайдер: {settings.llm_provider}")
-    typer.echo(f"Модель:    {settings.llm_model}")
-    if settings.llm_base_url:
-        typer.echo(f"URL:       {settings.llm_base_url}")
+    if settings.llm_provider == "yandex":
+        typer.echo(f"Folder ID: {settings.yandex_folder_id or '—'}")
+        typer.echo(f"Модель:    gpt://{settings.yandex_folder_id}/{settings.yandex_model}")
+        if settings.llm_api_key:
+            typer.echo("Fallback:  Groq (если Yandex недоступен)")
+    else:
+        typer.echo(f"Модель:    {settings.llm_model}")
+        if settings.llm_base_url:
+            typer.echo(f"URL:       {settings.llm_base_url}")
 
     typer.echo("\nПроверяю доступность...")
     if not provider.is_available():

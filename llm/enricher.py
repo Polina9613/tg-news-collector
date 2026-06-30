@@ -136,6 +136,7 @@ def enrich_news_cards(
     min_score: int = 25,
     limit: int = 30,
     reprocess: bool = False,
+    fallback_provider=None,
 ) -> EnrichResult:
     """
     Многоступенчатое обогащение карточек:
@@ -145,6 +146,18 @@ def enrich_news_cards(
     3b. extract_cases + assign_trend — для кейсов
     """
     result = EnrichResult()
+
+    def _llm_call_with_fallback(method_name: str, *args, **kwargs):
+        """Вызывает метод провайдера, при ошибке пробует fallback."""
+        try:
+            return getattr(provider, method_name)(*args, **kwargs)
+        except Exception as e:
+            if fallback_provider:
+                logger.warning(
+                    f"Primary provider failed ({method_name}: {e}), trying fallback..."
+                )
+                return getattr(fallback_provider, method_name)(*args, **kwargs)
+            raise
 
     with get_session() as session:
         query = session.query(NewsCard)
@@ -173,7 +186,7 @@ def enrich_news_cards(
                 channel_context = _build_channel_context(card)
 
                 # ── Ступень 1: релевантность ──────────────────────────────
-                relevant, reason = provider.check_relevance(card.clean_text, channel_context)
+                relevant, reason = _llm_call_with_fallback("check_relevance", card.clean_text, channel_context)
                 card.llm_relevant = relevant
 
                 if not relevant:
@@ -187,14 +200,14 @@ def enrich_news_cards(
                 time.sleep(6)
 
                 # ── Ступень 2: классификация ──────────────────────────────
-                classification = provider.classify_post(card.clean_text, channel_context)
+                classification = _llm_call_with_fallback("classify_post", card.clean_text, channel_context)
                 post_type = classification.get("type", "news")
                 logger.debug(f"  → {post_type}: {classification.get('reason', '')}")
 
                 # ── Ступень 3a: новость → только резюме ───────────────────
                 if post_type == "news":
                     time.sleep(6)
-                    card.summary = provider.generate_summary(card.clean_text)
+                    card.summary = _llm_call_with_fallback("generate_summary", card.clean_text)
                     result.news_only += 1
                     card.llm_enriched = True
                     card.llm_enriched_at = datetime.utcnow()
@@ -207,14 +220,14 @@ def enrich_news_cards(
 
                 time.sleep(6)
                 source_url = card.source_url or card.post_url
-                cases_data = provider.extract_cases(card.clean_text, source_url, channel_context)
+                cases_data = _llm_call_with_fallback("extract_cases", card.clean_text, source_url, channel_context)
                 logger.debug(f"  → extracted {len(cases_data)} case(s)")
 
                 for case_data in cases_data:
                     time.sleep(5)
 
                     # Привязка к тренду
-                    trend_decision = provider.assign_trend(case_data, active_trends)
+                    trend_decision = _llm_call_with_fallback("assign_trend", case_data, active_trends)
                     decision = trend_decision.get("decision", "none")
                     trend_id = None
 

@@ -24,6 +24,9 @@ dependencies = [
     "transliterate>=1.10",
     "aiogram>=3.13",
     "apscheduler>=3.10",
+    "feedparser>=6.0",
+    "readability-lxml>=0.8",
+    "lxml>=5.0",
 ]
 
 [project.optional-dependencies]

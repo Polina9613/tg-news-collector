@@ -9,7 +9,7 @@ from telethon import TelegramClient
 from telethon.errors import FloodWaitError
 from telethon.tl.types import MessageEntityTextUrl, MessageEntityUrl
 
-from collector.sources_loader import load_sources, sync_sources_to_db
+from collector.sources_loader import load_pdf_channels, load_sources, sync_sources_to_db
 from config.settings import Settings
 from db.base import get_session
 from db.models import RawPost, Source
@@ -41,6 +41,30 @@ def extract_urls_from_message(message: object) -> list[str]:
     return result
 
 
+def _is_pdf_post(message: object) -> bool:
+    """Return True if the message has a PDF document attachment."""
+    doc = getattr(message, "document", None)
+    if doc is None:
+        return False
+    for attr in getattr(doc, "attributes", None) or []:
+        file_name = getattr(attr, "file_name", None)
+        if file_name and str(file_name).lower().endswith(".pdf"):
+            return True
+    return False
+
+
+def _extract_pdf_name(message: object) -> str | None:
+    """Return the PDF filename from a message document, or None."""
+    doc = getattr(message, "document", None)
+    if doc is None:
+        return None
+    for attr in getattr(doc, "attributes", None) or []:
+        file_name = getattr(attr, "file_name", None)
+        if file_name and str(file_name).lower().endswith(".pdf"):
+            return str(file_name)
+    return None
+
+
 @dataclass
 class CollectResult:
     channel_username: str
@@ -50,6 +74,7 @@ class CollectResult:
     skipped_empty: int = 0
     errors: int = 0
     error_messages: list[str] = field(default_factory=list)
+    pdf_posts: list[dict] = field(default_factory=list)
 
 
 class TelegramCollector:
@@ -122,6 +147,7 @@ class TelegramCollector:
         username: str,
         days: int = 7,
         source_id: int | None = None,
+        is_pdf_channel: bool = False,
     ) -> CollectResult:
         assert self._client is not None, "Call connect() before collecting"
         clean_username = username.lstrip("@")
@@ -154,6 +180,19 @@ class TelegramCollector:
                     logger.info(f"@{clean_username}: fetched {result.total_fetched} posts...")
 
                 try:
+                    if is_pdf_channel and _is_pdf_post(message):
+                        filename = _extract_pdf_name(message) or "unknown.pdf"
+                        post_url = f"https://t.me/{clean_username}/{message.id}"
+                        result.pdf_posts.append({
+                            "filename": filename,
+                            "post_url": post_url,
+                            "post_text": (message.text or "")[:500],
+                            "channel_username": f"@{clean_username}",
+                            "channel_title": clean_username,
+                        })
+                        result.skipped_empty += 1
+                        continue
+
                     if not message.text and message.media is None:
                         result.skipped_empty += 1
                         continue
@@ -204,6 +243,12 @@ class TelegramCollector:
 
         sync_sources_to_db(sources)
 
+        pdf_sources = load_pdf_channels(self._settings.sources_file)
+        if pdf_sources:
+            sync_sources_to_db(pdf_sources)
+
+        pdf_channel_set = {ch["username"].lstrip("@").lower() for ch in pdf_sources}
+
         with get_session() as session:
             db_sources = session.execute(select(Source)).scalars().all()
             source_map = {s.username: s.id for s in db_sources}
@@ -216,6 +261,19 @@ class TelegramCollector:
                 username=username,
                 days=days,
                 source_id=source_id,
+            )
+            results.append(result)
+
+        for src in pdf_sources:
+            username = src["username"]
+            source_id = source_map.get(username)
+            if source_id is None:
+                source_id = self._get_or_create_source_id(username.lstrip("@"))
+            result = await self.collect_channel(
+                username=username,
+                days=days,
+                source_id=source_id,
+                is_pdf_channel=True,
             )
             results.append(result)
 

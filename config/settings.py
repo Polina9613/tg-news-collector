@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     llm_timeout: int = 120
     llm_max_retries: int = 2
     llm_min_score: int = 25
+    # Yandex AI Studio
+    yandex_api_key: str | None = None
+    yandex_folder_id: str | None = None
+    yandex_model: str = "aliceai-llm/latest"
     # Telegram-бот
     bot_token: str = ""
     bot_admin_secret: str = ""

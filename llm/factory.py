@@ -29,4 +29,23 @@ def create_llm_provider(settings: Settings):
             timeout=settings.llm_timeout,
         )
 
-    raise ValueError(f"Неизвестный LLM провайдер: {provider_name!r}. Используйте 'groq' или 'ollama'")
+    if provider_name == "yandex":
+        from llm.yandex_provider import YandexProvider
+        if not settings.yandex_api_key:
+            raise ValueError("Для Yandex нужен YANDEX_API_KEY в .env")
+        if not settings.yandex_folder_id:
+            raise ValueError("Для Yandex нужен YANDEX_FOLDER_ID в .env")
+        logger.info(
+            f"Using Yandex AI provider: {settings.yandex_model}"
+            f" (folder: {settings.yandex_folder_id})"
+        )
+        return YandexProvider(
+            api_key=settings.yandex_api_key,
+            folder_id=settings.yandex_folder_id,
+            model=settings.yandex_model,
+            timeout=settings.llm_timeout,
+        )
+
+    raise ValueError(
+        f"Unknown LLM provider: {provider_name!r}. Use 'groq', 'ollama' or 'yandex'"
+    )
