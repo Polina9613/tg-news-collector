@@ -29,6 +29,17 @@ def create_llm_provider(settings: Settings):
             timeout=settings.llm_timeout,
         )
 
+    if provider_name == "deepseek":
+        from llm.deepseek_provider import DeepSeekProvider
+        if not settings.llm_api_key:
+            raise ValueError("Для DeepSeek нужен LLM_API_KEY в .env")
+        logger.info(f"Using DeepSeek provider: {settings.llm_model} via artemox proxy")
+        return DeepSeekProvider(
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+            timeout=settings.llm_timeout,
+        )
+
     if provider_name == "yandex":
         from llm.yandex_provider import YandexProvider
         if not settings.yandex_api_key:
@@ -47,5 +58,25 @@ def create_llm_provider(settings: Settings):
         )
 
     raise ValueError(
-        f"Unknown LLM provider: {provider_name!r}. Use 'groq', 'ollama' or 'yandex'"
+        f"Unknown LLM provider: {provider_name!r}. Use 'groq', 'ollama', 'yandex' or 'deepseek'"
     )
+
+
+def create_fallback_provider(settings) -> object | None:
+    """
+    Создаёт резервный Groq-провайдер если задан GROQ_FALLBACK_API_KEY.
+    Возвращает None если ключ не задан.
+    """
+    if not settings.groq_fallback_api_key:
+        return None
+    try:
+        from llm.groq_provider import GroqProvider
+        logger.info(f"Fallback provider: Groq ({settings.groq_fallback_model})")
+        return GroqProvider(
+            api_key=settings.groq_fallback_api_key,
+            model=settings.groq_fallback_model,
+            timeout=settings.llm_timeout,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to create fallback provider: {e}")
+        return None

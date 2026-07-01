@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     yandex_api_key: str | None = None
     yandex_folder_id: str | None = None
     yandex_model: str = "aliceai-llm/latest"
+    # Groq как резервный провайдер при сбое основного
+    groq_fallback_api_key: str | None = None
+    groq_fallback_model: str = "llama-3.3-70b-versatile"
     # Telegram-бот
     bot_token: str = ""
     bot_admin_secret: str = ""

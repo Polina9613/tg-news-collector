@@ -615,16 +615,21 @@ def llm_check() -> None:
         typer.echo(f"✗ Ошибка инициализации: {e}")
         raise typer.Exit(code=1)
 
-    typer.echo(f"Провайдер: {settings.llm_provider}")
-    if settings.llm_provider == "yandex":
+    if settings.llm_provider == "deepseek":
+        typer.echo(f"Провайдер: deepseek (через artemox proxy)")
+        typer.echo(f"Модель:    {settings.llm_model}")
+        typer.echo(f"URL:       https://api.artemox.com/v1")
+    elif settings.llm_provider == "yandex":
+        typer.echo(f"Провайдер: {settings.llm_provider}")
         typer.echo(f"Folder ID: {settings.yandex_folder_id or '—'}")
         typer.echo(f"Модель:    gpt://{settings.yandex_folder_id}/{settings.yandex_model}")
-        if settings.llm_api_key:
-            typer.echo("Fallback:  Groq (если Yandex недоступен)")
     else:
+        typer.echo(f"Провайдер: {settings.llm_provider}")
         typer.echo(f"Модель:    {settings.llm_model}")
         if settings.llm_base_url:
             typer.echo(f"URL:       {settings.llm_base_url}")
+    if settings.groq_fallback_api_key:
+        typer.echo(f"Fallback:  Groq {settings.groq_fallback_model}")
 
     typer.echo("\nПроверяю доступность...")
     if not provider.is_available():

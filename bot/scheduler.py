@@ -94,21 +94,10 @@ async def auto_pipeline_cycle(bot: Bot) -> None:
     def _enrich():
         from config.settings import get_settings
         from llm.enricher import enrich_news_cards
-        from llm.factory import create_llm_provider
+        from llm.factory import create_fallback_provider, create_llm_provider
         settings = get_settings()
         provider = create_llm_provider(settings)
-
-        fallback = None
-        if settings.llm_provider == "yandex" and settings.llm_api_key:
-            try:
-                from llm.groq_provider import GroqProvider
-                fallback = GroqProvider(
-                    api_key=settings.llm_api_key,
-                    model="llama-3.3-70b-versatile",
-                    timeout=settings.llm_timeout,
-                )
-            except Exception:
-                pass
+        fallback = create_fallback_provider(settings)
 
         return enrich_news_cards(
             provider,

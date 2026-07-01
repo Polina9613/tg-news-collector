@@ -77,3 +77,49 @@ class TestUnknownProvider:
     def test_unknown_provider_message_includes_name(self):
         with pytest.raises(ValueError, match="gpt4all"):
             create_llm_provider(_settings(llm_provider="gpt4all"))
+
+
+class TestCreateFallbackProvider:
+    def test_fallback_returns_none_if_no_key(self):
+        from llm.factory import create_fallback_provider
+        s = MagicMock()
+        s.groq_fallback_api_key = None
+        assert create_fallback_provider(s) is None
+
+    def test_fallback_creates_groq_if_key_set(self):
+        from llm.factory import create_fallback_provider
+        from llm.groq_provider import GroqProvider
+        s = MagicMock()
+        s.groq_fallback_api_key = "gsk_test"
+        s.groq_fallback_model = "llama-3.3-70b-versatile"
+        s.llm_timeout = 60
+        result = create_fallback_provider(s)
+        assert isinstance(result, GroqProvider)
+        assert result.api_key == "gsk_test"
+        assert result.model == "llama-3.3-70b-versatile"
+
+    def test_fallback_independent_of_main_provider(self):
+        """Fallback создаётся независимо от основного провайдера."""
+        from llm.deepseek_provider import DeepSeekProvider
+        from llm.factory import create_fallback_provider, create_llm_provider
+        from llm.groq_provider import GroqProvider
+
+        s = MagicMock()
+        s.llm_provider = "deepseek"
+        s.llm_api_key = "deepseek_key"
+        s.llm_model = "deepseek-v4-flash"
+        s.llm_timeout = 60
+        s.groq_fallback_api_key = "gsk_fallback"
+        s.groq_fallback_model = "llama-3.3-70b-versatile"
+
+        main = create_llm_provider(s)
+        fallback = create_fallback_provider(s)
+
+        assert isinstance(main, DeepSeekProvider)
+        assert isinstance(fallback, GroqProvider)
+
+    def test_fallback_empty_string_key_returns_none(self):
+        from llm.factory import create_fallback_provider
+        s = MagicMock()
+        s.groq_fallback_api_key = ""
+        assert create_fallback_provider(s) is None
