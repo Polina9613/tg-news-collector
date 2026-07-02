@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from loguru import logger
+from sqlalchemy import or_
 
 from db.base import get_session
 from db.models import NewsCard, Trend, TrendCase, get_period_label
@@ -20,6 +21,18 @@ class EnrichResult:
     skipped_empty: int = 0
     errors: int = 0
     error_messages: list[str] = field(default_factory=list)
+
+
+def _prepare_text(card) -> str:
+    """Обрезает длинные тексты — DeepSeek таймаутит на текстах > 2000 символов."""
+    text = card.clean_text or ""
+    if len(text) <= 1800:
+        return text
+    truncated = text[:1500]
+    last_dot = truncated.rfind(". ")
+    if last_dot > 800:
+        truncated = truncated[:last_dot + 1]
+    return truncated + "\n\n[текст обрезан]"
 
 
 def _load_active_trends() -> list[dict]:
@@ -140,10 +153,9 @@ def enrich_news_cards(
 ) -> EnrichResult:
     """
     Многоступенчатое обогащение карточек:
-    1. check_relevance — отсев нерелевантных
-    2. classify_post — новость или кейс
-    3a. generate_summary — для новостей (резюме для дайджеста)
-    3b. extract_cases + assign_trend — для кейсов
+    1. check_relevance_and_classify — релевантность + тип (1 вызов вместо 2)
+    2. Для новостей: авто-резюме из clean_text (без LLM)
+    3. Для кейсов: extract_cases + assign_trend
     """
     result = EnrichResult()
 
@@ -164,6 +176,12 @@ def enrich_news_cards(
         if not reprocess:
             query = query.filter(NewsCard.llm_enriched == False)  # noqa: E712
         query = query.filter(NewsCard.relevance_score >= min_score)
+        query = query.filter(
+            or_(
+                NewsCard.llm_retry_after == None,  # noqa: E711
+                NewsCard.llm_retry_after <= datetime.utcnow(),
+            )
+        )
         query = query.order_by(NewsCard.relevance_score.desc())
         card_ids = [c.id for c in query.limit(limit).all()]
 
@@ -184,43 +202,40 @@ def enrich_news_cards(
                 logger.info(f"[{i}/{result.total}] {(card.title or '?')[:60]}")
 
                 channel_context = _build_channel_context(card)
+                text = _prepare_text(card)
 
-                # ── Ступень 1: релевантность ──────────────────────────────
-                relevant, reason = _llm_call_with_fallback("check_relevance", card.clean_text, channel_context)
+                # ── Ступень 1+2: релевантность и классификация (1 вызов) ──
+                rc = _llm_call_with_fallback("check_relevance_and_classify", text, channel_context)
+                relevant = rc["relevant"]
                 card.llm_relevant = relevant
 
                 if not relevant:
                     result.irrelevant += 1
-                    logger.debug(f"  → irrelevant: {reason}")
+                    logger.debug(f"  → irrelevant: {rc['relevance_reason']}")
                     card.llm_enriched = True
                     card.llm_enriched_at = datetime.utcnow()
                     continue
 
                 result.relevant += 1
-                time.sleep(6)
+                post_type = rc.get("type", "news")
+                logger.debug(f"  → {post_type}: {rc.get('classify_reason', '')}")
 
-                # ── Ступень 2: классификация ──────────────────────────────
-                classification = _llm_call_with_fallback("classify_post", card.clean_text, channel_context)
-                post_type = classification.get("type", "news")
-                logger.debug(f"  → {post_type}: {classification.get('reason', '')}")
+                # Авто-резюме из clean_text (без LLM) — используется в Excel
+                if not card.summary:
+                    card.summary = (card.clean_text or "")[:280].rsplit(" ", 1)[0] + "…"
 
-                # ── Ступень 3a: новость → только резюме ───────────────────
+                # ── Ступень 2: новость — готово ───────────────────────────
                 if post_type == "news":
-                    time.sleep(6)
-                    card.summary = _llm_call_with_fallback("generate_summary", card.clean_text)
                     result.news_only += 1
                     card.llm_enriched = True
                     card.llm_enriched_at = datetime.utcnow()
-                    logger.debug("  → news summary generated")
+                    logger.debug("  → news, auto-summary set")
                     continue
 
-                # ── Ступень 3b: кейс → извлечение + привязка к тренду ────
-                time.sleep(6)
-                card.summary = provider.generate_summary(card.clean_text)
-
+                # ── Ступень 3: кейс → извлечение + привязка к тренду ─────
                 time.sleep(6)
                 source_url = card.source_url or card.post_url
-                cases_data = _llm_call_with_fallback("extract_cases", card.clean_text, source_url, channel_context)
+                cases_data = _llm_call_with_fallback("extract_cases", text, source_url, channel_context)
                 logger.debug(f"  → extracted {len(cases_data)} case(s)")
 
                 for case_data in cases_data:
@@ -283,9 +298,29 @@ def enrich_news_cards(
                 card.llm_enriched_at = datetime.utcnow()
 
         except Exception as e:
+            error_str = str(e)
             result.errors += 1
             result.error_messages.append(f"card_id={card_id}: {e}")
             logger.error(f"Enrich error card_id={card_id}: {e}")
+
+            is_timeout = "timed out" in error_str.lower() or "timeout" in error_str.lower()
+            is_empty = "empty response" in error_str.lower() or "NoneType" in error_str
+            is_rate_limit = "429" in error_str or "Too Many Requests" in error_str
+
+            if is_timeout or is_empty or is_rate_limit:
+                with get_session() as _s:
+                    _card = _s.get(NewsCard, card_id)
+                    if _card:
+                        _card.llm_retry_after = datetime.utcnow() + timedelta(hours=2)
+                        reason = "timeout" if is_timeout else ("empty" if is_empty else "rate_limit")
+                        logger.warning(
+                            f"card_id={card_id} sent to back of queue ({reason})"
+                            f" — retry after 2h"
+                        )
+
+                if is_timeout or is_rate_limit:
+                    logger.warning("Stopping current enrich cycle early")
+                    break
 
         time.sleep(10)
 

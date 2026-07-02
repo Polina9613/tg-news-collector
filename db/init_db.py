@@ -138,6 +138,17 @@ def migrate_remove_subscriptions() -> None:
         logger.info("Migration: removed subscriptions table, subscriber→analyst")
 
 
+def migrate_add_retry_after() -> None:
+    with engine.connect() as conn:
+        existing = [r[1] for r in conn.execute(text("PRAGMA table_info(news_cards)"))]
+        if "llm_retry_after" not in existing:
+            conn.execute(text(
+                "ALTER TABLE news_cards ADD COLUMN llm_retry_after DATETIME"
+            ))
+            conn.commit()
+            logger.info("Migration: added llm_retry_after to news_cards")
+
+
 def migrate_add_source_topics() -> None:
     """Добавляет колонку topics в sources если её нет (для старых установок)."""
     with engine.connect() as conn:
@@ -318,6 +329,7 @@ def init_db() -> None:
     migrate_make_news_card_id_nullable()
     migrate_add_source_topics()
     migrate_trends_v2()
+    migrate_add_retry_after()
 
 
 def get_db_stats() -> dict:

@@ -68,7 +68,7 @@ class YandexProvider:
             logger.warning(f"Yandex AI availability check failed: {e}")
             return False
 
-    def _call(self, system: str, user: str, retry: int = 0) -> str:
+    def _call(self, system: str, user: str, retry: int = 0, max_tokens: int = 1500) -> str:
         """
         Отправляет запрос к Yandex AI Studio через OpenAI-совместимый эндпоинт.
         Авторизация: Api-Key (не Bearer).
@@ -87,12 +87,15 @@ class YandexProvider:
                         {"role": "user", "content": user},
                     ],
                     "temperature": 0.1,
-                    "max_tokens": 1500,
+                    "max_tokens": max_tokens,
                 },
                 timeout=self.timeout,
             )
             response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"].strip()
+            content = response.json()["choices"][0]["message"]["content"]
+            if not content:
+                raise ValueError("Empty response from Yandex API")
+            return content.strip()
 
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
@@ -101,7 +104,7 @@ class YandexProvider:
                 wait = 60 * (retry + 1)
                 logger.warning(f"Yandex rate limit, waiting {wait}s (retry {retry + 1}/3)")
                 time.sleep(wait)
-                return self._call(system, user, retry=retry + 1)
+                return self._call(system, user, retry=retry + 1, max_tokens=max_tokens)
             if status == 401:
                 logger.error("Yandex API auth error: check YANDEX_API_KEY and YANDEX_FOLDER_ID")
                 raise
@@ -112,7 +115,7 @@ class YandexProvider:
             if retry < 2:
                 logger.warning(f"Yandex timeout, retry {retry + 1}/2")
                 time.sleep(5)
-                return self._call(system, user, retry=retry + 1)
+                return self._call(system, user, retry=retry + 1, max_tokens=max_tokens)
             raise
 
     # ══════════════════════════════════════════════════════════════════════
@@ -235,6 +238,56 @@ class YandexProvider:
         except Exception as e:
             logger.warning(f"classify_post parse error: {e} | raw: {raw[:100]}")
             return {"type": "news", "case_count": 0, "reason": "parse error"}
+
+    # ══════════════════════════════════════════════════════════════════════
+    # ОБЪЕДИНЁННЫЙ ВЫЗОВ 1+2 — Релевантность и классификация
+    # ══════════════════════════════════════════════════════════════════════
+
+    def check_relevance_and_classify(
+        self, text: str, channel_context: str | None = None
+    ) -> dict:
+        """Объединённый вызов: релевантность + классификация. Экономит 1 LLM-вызов на пост."""
+        system = (
+            "Ты — методолог финтех-исследования в крупном российском банке. "
+            "Анализируешь посты из Telegram-каналов. Отвечай строго JSON."
+        )
+        channel_hint = f"\nКонтекст канала: {channel_context}\n" if channel_context else ""
+
+        user = f"""Выполни два анализа поста одновременно.
+
+АНАЛИЗ 1 — РЕЛЕВАНТНОСТЬ для финтех-исследования:
+Релевантно: финансовые продукты, финтех, платежи, биометрия в финансах,
+цифровые валюты, ИИ в финансах, регулирование финрынка, кибербезопасность
+платежей, импортозамещение банковского ИТ, embedded finance, Open API.
+Нерелевантно: лайфстайл, общие ИИ-новости без финансового контекста,
+реклама курсов, кадровые новости без продуктовой сути.
+
+АНАЛИЗ 2 — ТИП (только если релевантно):
+КЕЙС — конкретная компания + конкретное действие + технологическая суть + ценность.
+НОВОСТЬ — событие/факт без продуктовой конкретики (ставки, кадры, отчётность).
+Если сомневаешься — новость.
+{channel_hint}
+Пост:
+{text[:2000]}
+
+Ответ строго JSON:
+{{"relevant": true/false, "relevance_reason": "...", "type": "case"/"news"/null, "case_count": число, "classify_reason": "..."}}"""
+
+        raw = self._call(system, user, max_tokens=300)
+        try:
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            data = json.loads(match.group()) if match else {}
+            return {
+                "relevant": bool(data.get("relevant", False)),
+                "relevance_reason": data.get("relevance_reason", ""),
+                "type": data.get("type", "news"),
+                "case_count": int(data.get("case_count", 0)),
+                "classify_reason": data.get("classify_reason", ""),
+            }
+        except Exception as e:
+            logger.warning(f"check_relevance_and_classify parse error: {e}")
+            return {"relevant": False, "relevance_reason": "parse error",
+                    "type": "news", "case_count": 0, "classify_reason": ""}
 
     # ══════════════════════════════════════════════════════════════════════
     # СТУПЕНЬ 3a — Резюме для новостей
@@ -366,7 +419,7 @@ class YandexProvider:
         )
 
         trends_text = "\n".join(
-            f"{t['id']}. {t['name']} ({t.get('category', '—')}) — {t['description']}"
+            f"{t['id']}. {t['name']}" + (f" [{t.get('category','')}]" if t.get("category") else "")
             for t in existing_trends
         )
 

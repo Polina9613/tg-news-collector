@@ -85,6 +85,7 @@ class NewsCard(Base):
     llm_relevant: Mapped[bool | None] = mapped_column(default=None)
     llm_enriched: Mapped[bool] = mapped_column(default=False)
     llm_enriched_at: Mapped[datetime | None] = mapped_column(default=None)
+    llm_retry_after: Mapped[datetime | None] = mapped_column(default=None)
 
     raw_post: Mapped["RawPost"] = relationship(back_populates="news_card")
     trend_cases: Mapped[list["TrendCase"]] = relationship(back_populates="news_card")

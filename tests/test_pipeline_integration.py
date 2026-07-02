@@ -150,9 +150,13 @@ class TestProcessRawPosts:
 class TestEnrichNewsCards:
     def _mock_provider(self):
         p = MagicMock()
-        p.check_relevance.return_value = (True, "финтех-кейс")
-        p.classify_post.return_value = {"type": "case", "case_count": 1, "reason": "test"}
-        p.generate_summary.return_value = "Краткое резюме."
+        p.check_relevance_and_classify.return_value = {
+            "relevant": True,
+            "relevance_reason": "финтех-кейс",
+            "type": "case",
+            "case_count": 1,
+            "classify_reason": "конкретный продукт",
+        }
         p.extract_cases.return_value = [{
             "case_title": "Сбер Face Pay 15k банкоматов",
             "company": "Сбер",
@@ -222,7 +226,13 @@ class TestEnrichNewsCards:
         _create_card(gs, post_id, score=60, enriched=False)
 
         provider = self._mock_provider()
-        provider.check_relevance.return_value = (False, "off-topic")
+        provider.check_relevance_and_classify.return_value = {
+            "relevant": False,
+            "relevance_reason": "off-topic",
+            "type": "news",
+            "case_count": 0,
+            "classify_reason": "",
+        }
 
         from llm.enricher import enrich_news_cards
         with patch("llm.enricher.time.sleep"):
@@ -237,7 +247,7 @@ class TestEnrichNewsCards:
         _create_card(gs, post_id, score=60, enriched=False)
 
         primary = MagicMock()
-        primary.check_relevance.side_effect = Exception("Primary failed")
+        primary.check_relevance_and_classify.side_effect = Exception("Primary failed")
 
         fallback = self._mock_provider()
 
@@ -246,7 +256,7 @@ class TestEnrichNewsCards:
             result = enrich_news_cards(primary, min_score=25, limit=5, fallback_provider=fallback)
 
         assert result.relevant >= 1
-        fallback.check_relevance.assert_called_once()
+        fallback.check_relevance_and_classify.assert_called_once()
 
 
 class TestDuplicateDetection:
@@ -348,3 +358,48 @@ class TestDuplicateDetection:
             "company": "Сбер",
         }, since_days=5)
         assert dup_id is None
+
+
+# ── _prepare_text ─────────────────────────────────────────────────────────────
+
+def test_prepare_text_truncates_long():
+    from llm.enricher import _prepare_text
+
+    class C:
+        clean_text = "А" * 3000
+
+    result = _prepare_text(C())
+    assert len(result) <= 1600
+    assert "[текст обрезан]" in result
+
+
+def test_prepare_text_keeps_short():
+    from llm.enricher import _prepare_text
+
+    class C:
+        clean_text = "Короткий текст"
+
+    result = _prepare_text(C())
+    assert result == "Короткий текст"
+
+
+# ── retry_after ───────────────────────────────────────────────────────────────
+
+def test_card_sent_to_back_of_queue_on_timeout(mem_db):
+    """При таймауте карточка получает llm_retry_after, а не помечается enriched."""
+    engine, gs = mem_db
+    _src_id, post_id = _create_source_and_post(gs, suffix="_timeout")
+    card_id = _create_card(gs, post_id, score=80, enriched=False)
+
+    mock_provider = MagicMock()
+    mock_provider.check_relevance_and_classify.side_effect = TimeoutError("timed out")
+
+    from llm.enricher import enrich_news_cards
+    with patch("llm.enricher.time.sleep"):
+        result = enrich_news_cards(mock_provider, min_score=0, limit=1)
+
+    assert result.errors == 1
+    with gs() as s:
+        c = s.get(NewsCard, card_id)
+        assert c.llm_enriched is False
+        assert c.llm_retry_after is not None
