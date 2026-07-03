@@ -1,3 +1,4 @@
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -7,6 +8,28 @@ from sqlalchemy import or_
 
 from db.base import get_session
 from db.models import NewsCard, Trend, TrendCase, get_period_label
+from processor.prefilter import should_skip_llm
+from processor.early_dedup import find_early_duplicate
+
+_EMOJI_DECORATION = re.compile(
+    r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E0-\U0001F1FF]{2,}"
+)
+_HASHTAG_BLOCK = re.compile(r"(#\w+[\s,]*){3,}$")
+_CHANNEL_SIGNATURE = re.compile(
+    r"(подписаться|наш канал|читать далее|источник:)\s*@?\w*\s*$",
+    re.IGNORECASE,
+)
+_MULTI_NEWLINE = re.compile(r"\n{3,}")
+_MULTI_WHITESPACE = re.compile(r"[ \t]{2,}")
+
+
+def _compress_text(text: str) -> str:
+    text = _EMOJI_DECORATION.sub(" ", text)
+    text = _HASHTAG_BLOCK.sub("", text)
+    text = _CHANNEL_SIGNATURE.sub("", text)
+    text = _MULTI_NEWLINE.sub("\n\n", text)
+    text = _MULTI_WHITESPACE.sub(" ", text)
+    return text.strip()
 
 
 @dataclass
@@ -19,13 +42,15 @@ class EnrichResult:
     pending_trends: int = 0
     duplicates_marked: int = 0
     skipped_empty: int = 0
+    pre_filtered: int = 0
+    early_duplicates: int = 0
     errors: int = 0
     error_messages: list[str] = field(default_factory=list)
 
 
 def _prepare_text(card) -> str:
     """Обрезает длинные тексты — DeepSeek таймаутит на текстах > 2000 символов."""
-    text = card.clean_text or ""
+    text = _compress_text(card.clean_text or "")
     if len(text) <= 1800:
         return text
     truncated = text[:1500]
@@ -199,6 +224,29 @@ def enrich_news_cards(
                     result.skipped_empty += 1
                     continue
 
+                raw_text = card.clean_text
+
+                # ── Pre-filter: явный мусор без LLM ──────────────────────────
+                skip, skip_reason = should_skip_llm(raw_text)
+                if skip:
+                    card.llm_enriched = True
+                    card.llm_enriched_at = datetime.utcnow()
+                    card.llm_relevant = False
+                    result.irrelevant += 1
+                    result.pre_filtered += 1
+                    logger.debug(f"card_id={card_id} pre-filtered: {skip_reason}")
+                    continue
+
+                # ── Ранняя дедупликация: похож на уже обработанный ───────────
+                dup_id = find_early_duplicate(raw_text, card_id)
+                if dup_id:
+                    card.llm_enriched = True
+                    card.llm_enriched_at = datetime.utcnow()
+                    card.summary = f"__early_duplicate_of_{dup_id}__"
+                    result.early_duplicates += 1
+                    logger.debug(f"card_id={card_id} early duplicate of #{dup_id}, skipping LLM")
+                    continue
+
                 logger.info(f"[{i}/{result.total}] {(card.title or '?')[:60]}")
 
                 channel_context = _build_channel_context(card)
@@ -324,10 +372,11 @@ def enrich_news_cards(
 
         time.sleep(10)
 
+    llm_calls_saved = result.pre_filtered + result.early_duplicates
     logger.info(
         f"Enrich done: relevant={result.relevant} irrelevant={result.irrelevant} "
         f"news_only={result.news_only} cases={result.cases_created} "
-        f"pending_trends={result.pending_trends} duplicates={result.duplicates_marked} "
-        f"errors={result.errors}"
+        f"pre_filtered={result.pre_filtered} early_dup={result.early_duplicates} "
+        f"(saved ~{llm_calls_saved} LLM calls) errors={result.errors}"
     )
     return result

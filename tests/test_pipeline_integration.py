@@ -48,6 +48,7 @@ def mem_db():
         "llm.enricher.get_session",
         "exporter.excel.get_session",
         "processor.pipeline.get_session",
+        "processor.early_dedup.get_session",
     ]
     with ExitStack() as stack:
         for t in targets:
@@ -384,6 +385,41 @@ def test_prepare_text_keeps_short():
 
 
 # ── retry_after ───────────────────────────────────────────────────────────────
+
+# ── _compress_text ────────────────────────────────────────────────────────────
+
+def test_compress_removes_emoji_decoration():
+    from llm.enricher import _compress_text
+    text = "Важная новость 🔥🔥🔥🔥🔥 про финтех"
+    result = _compress_text(text)
+    assert "🔥🔥🔥🔥🔥" not in result
+    assert "Важная новость" in result
+    assert "финтех" in result
+
+
+def test_compress_removes_hashtag_block():
+    from llm.enricher import _compress_text
+    text = "Сбербанк запустил новый продукт для клиентов\n#финтех #банки #новости #сбер"
+    result = _compress_text(text)
+    assert "#финтех" not in result
+    assert "Сбербанк запустил новый продукт" in result
+
+
+def test_compress_keeps_meaningful_hashtags_inline():
+    from llm.enricher import _compress_text
+    text = "Обсуждаем главные новости #финтех индустрии сегодня в деталях"
+    result = _compress_text(text)
+    assert "#финтех" in result
+
+
+def test_compress_collapses_whitespace():
+    from llm.enricher import _compress_text
+    text = "Текст    с     лишними      пробелами"
+    result = _compress_text(text)
+    assert "    " not in result
+    assert "Текст" in result
+    assert "пробелами" in result
+
 
 def test_card_sent_to_back_of_queue_on_timeout(mem_db):
     """При таймауте карточка получает llm_retry_after, а не помечается enriched."""
