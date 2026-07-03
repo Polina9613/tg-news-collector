@@ -3,7 +3,7 @@ import asyncio
 from loguru import logger
 
 from bot.config import create_bot, create_dispatcher
-from bot.menu import refresh_all_user_commands, set_default_commands
+from bot.menu import set_bot_commands
 from bot.scheduler import setup_scheduler
 from config.settings import setup_logging
 from db.init_db import init_db
@@ -18,8 +18,7 @@ async def main() -> None:
 
     scheduler = setup_scheduler(bot)
 
-    await set_default_commands(bot)
-    await refresh_all_user_commands(bot)
+    await set_bot_commands(bot)
 
     me = await bot.get_me()
     logger.info(f"Bot started: @{me.username}")

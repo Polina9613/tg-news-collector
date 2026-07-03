@@ -4,7 +4,7 @@ from aiogram.types import CallbackQuery, Message
 from loguru import logger
 
 from bot.audit import log_action
-from bot.menu import update_user_commands
+from bot.menu import set_bot_commands, set_user_commands
 from bot.permissions import require_role
 from bot.users import (
     count_admins,
@@ -51,7 +51,7 @@ async def cmd_admin(message: Message) -> None:
     set_role(message.from_user.id, "admin")
     log_action(user["id"], action="self_promote_admin")
     logger.info(f"User tg={message.from_user.id} promoted to admin via secret")
-    await update_user_commands(message.bot, message.from_user.id, "admin")
+    await set_user_commands(message.bot, message.from_user.id, "admin")
 
     await message.answer(
         "Ты теперь администратор!\n"
@@ -91,7 +91,7 @@ async def cmd_promote(message: Message) -> None:
         target_id=target["id"],
         payload={"to": "admin"},
     )
-    await update_user_commands(message.bot, target["telegram_id"], "admin")
+    await set_user_commands(message.bot, target["telegram_id"], "admin")
     await message.answer(f"✅ @{target_username} теперь администратор.")
 
 
@@ -134,7 +134,7 @@ async def cmd_demote(message: Message) -> None:
         target_id=target["id"],
         payload={"from": old_role, "to": "analyst"},
     )
-    await update_user_commands(message.bot, target["telegram_id"], "analyst")
+    await set_user_commands(message.bot, target["telegram_id"], "analyst")
     await message.answer(f"✅ @{target_username} теперь аналитик.")
 
 
@@ -152,8 +152,7 @@ async def cmd_broadcast_digest(message: Message) -> None:
 @require_role("admin")
 async def cmd_refresh_menu(message: Message) -> None:
     """Обновить меню команд Telegram для всех активных пользователей."""
-    from bot.menu import set_default_commands
-    await set_default_commands(message.bot)
+    await set_bot_commands(message.bot)
     from db.base import get_session
     from db.models import BotUser
     with get_session() as s:
