@@ -115,6 +115,9 @@ async def handle_approve_trend(call: CallbackQuery) -> None:
         trend.status = "active"
         log_action(user["id"], "approve_trend", "trend", trend_id, {"name": trend_name})
 
+    from llm.enricher import _load_active_trends
+    _load_active_trends(force_refresh=True)
+
     await call.message.edit_text(
         f"✅ <b>Одобрен:</b> {trend_name}\n"
         "Тренд переведён в active и доступен для новых кейсов."

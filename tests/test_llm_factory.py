@@ -35,16 +35,6 @@ class TestGroqProvider:
         assert isinstance(provider, GroqProvider)
 
 
-class TestOllamaProvider:
-    def test_creates_ollama_provider(self):
-        from llm.ollama_provider import OllamaProvider
-        provider = create_llm_provider(_settings(llm_provider="ollama"))
-        assert isinstance(provider, OllamaProvider)
-
-    def test_ollama_without_base_url_raises(self):
-        with pytest.raises(ValueError, match="LLM_BASE_URL"):
-            create_llm_provider(_settings(llm_provider="ollama", llm_base_url=None))
-
 
 class TestYandexProvider:
     def test_creates_yandex_provider(self):

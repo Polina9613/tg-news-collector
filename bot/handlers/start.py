@@ -74,7 +74,6 @@ async def cmd_help(message: Message) -> None:
         "📋 <b>Редактор кейсов:</b>\n"
         "/review_week — все кейсы за период с фильтрами\n"
         "/edit &lt;id&gt; — редактировать кейс по ID\n"
-        "/review — старый редактор (только needs_review)\n"
         "/add — добавить кейс вручную\n\n"
         "📡 <b>Управление каналами:</b>\n"
         "/channels — список каналов\n"

@@ -32,6 +32,12 @@ def _compress_text(text: str) -> str:
     return text.strip()
 
 
+HIGH_CONFIDENCE_SCORE = 85  # rule-based score above which we trust relevance without LLM check
+
+_trends_cache: dict = {"data": None, "loaded_at": 0.0}
+_TRENDS_CACHE_TTL = 900  # 15 минут
+
+
 @dataclass
 class EnrichResult:
     total: int = 0
@@ -60,11 +66,16 @@ def _prepare_text(card) -> str:
     return truncated + "\n\n[текст обрезан]"
 
 
-def _load_active_trends() -> list[dict]:
-    """Загружает список активных трендов из БД для передачи в LLM."""
+def _load_active_trends(force_refresh: bool = False) -> list[dict]:
+    """Загружает список активных трендов. Кэшируется на 15 минут."""
+    now = time.time()
+    if not force_refresh and _trends_cache["data"] is not None:
+        if now - _trends_cache["loaded_at"] < _TRENDS_CACHE_TTL:
+            return _trends_cache["data"]
+
     with get_session() as s:
         trends = s.query(Trend).filter(Trend.status == "active").all()
-        return [
+        data = [
             {
                 "id": t.id,
                 "name": t.name,
@@ -73,6 +84,10 @@ def _load_active_trends() -> list[dict]:
             }
             for t in trends
         ]
+
+    _trends_cache["data"] = data
+    _trends_cache["loaded_at"] = now
+    return data
 
 
 def _create_pending_trend(name: str, description: str, case_id: int) -> int | None:
@@ -254,15 +269,21 @@ def enrich_news_cards(
 
                 # ── Ступень 1+2: релевантность и классификация (1 вызов) ──
                 rc = _llm_call_with_fallback("check_relevance_and_classify", text, channel_context)
-                relevant = rc["relevant"]
-                card.llm_relevant = relevant
 
-                if not relevant:
-                    result.irrelevant += 1
-                    logger.debug(f"  → irrelevant: {rc['relevance_reason']}")
-                    card.llm_enriched = True
-                    card.llm_enriched_at = datetime.utcnow()
-                    continue
+                if card.relevance_score >= HIGH_CONFIDENCE_SCORE:
+                    # Rule-based score very high — trust it for relevance.
+                    # TODO: when a cheap classify_post exists, skip combined call here.
+                    relevant = True
+                    card.llm_relevant = True
+                else:
+                    relevant = rc["relevant"]
+                    card.llm_relevant = relevant
+                    if not relevant:
+                        result.irrelevant += 1
+                        logger.debug(f"  → irrelevant: {rc['relevance_reason']}")
+                        card.llm_enriched = True
+                        card.llm_enriched_at = datetime.utcnow()
+                        continue
 
                 result.relevant += 1
                 post_type = rc.get("type", "news")

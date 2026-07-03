@@ -466,6 +466,63 @@ async def cmd_digest_now(message: Message) -> None:
     )
 
 
+# ── /research ─────────────────────────────────────────────────────────────────
+
+@router.message(Command("research"))
+async def cmd_research(message: Message) -> None:
+    """
+    /research "будущее офлайн платежей"
+    /research "ИИ в скоринге" 90   — с ограничением по дням
+    """
+    import asyncio
+    import re as _re
+
+    text = message.text.replace("/research", "", 1).strip()
+    if not text:
+        await message.answer(
+            "Использование:\n"
+            '/research "тема исследования"\n'
+            '/research "тема исследования" 90  — за последние 90 дней\n\n'
+            '/research "биометрические платежи"'
+        )
+        return
+
+    match = _re.match(r'"([^"]+)"\s*(\d+)?', text)
+    if match:
+        query = match.group(1)
+        days = int(match.group(2)) if match.group(2) else None
+    else:
+        query = text
+        days = None
+
+    status_msg = await message.answer(f"Готовлю исследование по теме «{query}»…")
+
+    def _run():
+        from config.settings import get_settings
+        from llm.factory import create_llm_provider
+        from research.generator import generate_research
+
+        settings = get_settings()
+        provider = create_llm_provider(settings)
+        return generate_research(provider, query, days=days)
+
+    result = await asyncio.to_thread(_run)
+
+    if not result:
+        await status_msg.edit_text(
+            f"Не найдено достаточно кейсов по теме «{query}».\n"
+            f"Попробуйте более широкую формулировку или посмотрите /trends."
+        )
+        return
+
+    await status_msg.edit_text(
+        f"Готово: «{result.query}»\n"
+        f"Кейсов: {result.cases_used} | Тренды: {', '.join(result.trends_covered)}"
+    )
+
+    await message.answer_document(FSInputFile(result.output_path))
+
+
 # ── /noop — заглушка для кнопки счётчика страниц ─────────────────────────────
 
 @router.callback_query(F.data == "noop")

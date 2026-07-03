@@ -18,17 +18,6 @@ def create_llm_provider(settings: Settings):
             timeout=settings.llm_timeout,
         )
 
-    if provider_name == "ollama":
-        from llm.ollama_provider import OllamaProvider
-        if not settings.llm_base_url:
-            raise ValueError("Для Ollama нужен LLM_BASE_URL в .env")
-        logger.info(f"Using Ollama provider: {settings.llm_model} @ {settings.llm_base_url}")
-        return OllamaProvider(
-            base_url=settings.llm_base_url,
-            model=settings.llm_model,
-            timeout=settings.llm_timeout,
-        )
-
     if provider_name == "deepseek":
         from llm.deepseek_provider import DeepSeekProvider
         if not settings.llm_api_key:
@@ -58,7 +47,7 @@ def create_llm_provider(settings: Settings):
         )
 
     raise ValueError(
-        f"Unknown LLM provider: {provider_name!r}. Use 'groq', 'ollama', 'yandex' or 'deepseek'"
+        f"Unknown LLM provider: {provider_name!r}. Use 'groq', 'deepseek' or 'yandex'"
     )
 
 

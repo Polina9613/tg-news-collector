@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     default_collect_days: int = 7
     # Минимальный балл релевантности новости.
     min_relevance_score: int = 30
-    # LLM провайдер: groq или ollama
+    # LLM провайдер: groq, deepseek или yandex
     llm_enabled: bool = False
     llm_provider: str = "groq"
     llm_api_key: str | None = None

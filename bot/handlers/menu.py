@@ -64,7 +64,6 @@ MENU_TEXTS: dict[str, str] = {
     "trends":    "🏷 Все тренды: /trends\nДетали тренда: /trend &lt;id&gt;",
     "export":    "📊 Excel-экспорт:\n<code>/export 7</code> или <code>/export all</code>",
     "stats":     "📊 Статистика базы: /stats",
-    "review":    "✏️ Кейсы на проверку: /review",
     "add":       "➕ Добавить кейс вручную: /add",
     "channels":  "📡 Управление каналами: /channels",
     "users":     "👥 Список пользователей: /users",

@@ -17,11 +17,11 @@ COMMANDS_ANALYST = [
     BotCommand(command="digest_now",  description="Последний дайджест"),
     BotCommand(command="stats",       description="Статистика"),
     BotCommand(command="excel_guide", description="Описание Excel"),
+    BotCommand(command="research",    description="Исследование по теме"),
 ]
 
 COMMANDS_ADMIN = COMMANDS_ANALYST + [
     BotCommand(command="review_week",      description="Кейсы недели с фильтрами"),
-    BotCommand(command="review",           description="Кейсы на проверку"),
     BotCommand(command="pending_trends",   description="Тренды на модерации"),
     BotCommand(command="add",              description="Добавить кейс"),
     BotCommand(command="channel_stats",    description="Статистика каналов"),
