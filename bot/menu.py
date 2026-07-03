@@ -32,6 +32,7 @@ COMMANDS_ADMIN = COMMANDS_ANALYST + [
     BotCommand(command="enrich",           description="LLM-обогащение"),
     BotCommand(command="digest",           description="Сгенерировать дайджест"),
     BotCommand(command="broadcast_digest", description="Рассылка дайджеста"),
+    BotCommand(command="refresh_menu",     description="Обновить меню команд"),
 ]
 
 _ROLE_COMMANDS = {

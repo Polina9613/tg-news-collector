@@ -60,7 +60,11 @@ async def cmd_help(message: Message) -> None:
         "/export 7|30|all — Excel-выгрузка\n"
         "/digest_now — последний дайджест\n"
         "/stats — статистика базы\n\n"
-        "📖 /excel_guide — описание структуры Excel\n"
+        "📖 /excel_guide — описание структуры Excel\n\n"
+        "🔬 <b>Исследование по теме:</b>\n"
+        "/research \"тема\" [дней] — исследование на основе базы кейсов\n"
+        "  Пример: /research \"биометрические платежи\"\n"
+        "  Пример: /research \"ИИ в скоринге\" 90\n"
     )
 
     admin_cmds = (
@@ -87,6 +91,7 @@ async def cmd_help(message: Message) -> None:
         "/promote @username — повысить до администратора\n"
         "/demote @username — понизить до аналитика\n\n"
         "📣 /broadcast_digest — рассылка дайджеста сейчас\n"
+        "/refresh_menu — обновить меню команд у всех пользователей\n"
     )
 
     if role == "admin":

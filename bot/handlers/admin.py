@@ -148,6 +148,23 @@ async def cmd_broadcast_digest(message: Message) -> None:
     await message.answer("Рассылка завершена. Подробности в логах.")
 
 
+@router.message(Command("refresh_menu"))
+@require_role("admin")
+async def cmd_refresh_menu(message: Message) -> None:
+    """Обновить меню команд Telegram для всех активных пользователей."""
+    from bot.menu import set_default_commands
+    await set_default_commands(message.bot)
+    from db.base import get_session
+    from db.models import BotUser
+    with get_session() as s:
+        count = s.query(BotUser).filter_by(is_active=True).count()
+    await message.answer(
+        f"✅ Меню команд обновлено.\n"
+        f"Применится для {count} активных пользователей "
+        f"(может занять до нескольких минут на стороне Telegram)."
+    )
+
+
 
 @router.callback_query(F.data.startswith("pdf:yes:"))
 async def handle_pdf_yes(call: CallbackQuery) -> None:
