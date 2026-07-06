@@ -200,10 +200,11 @@ async def _save_field(
 
     user_tg_id = call.from_user.id if call else message.from_user.id
     user = get_user_by_tg_id(user_tg_id)
-    log_action(
-        user["id"], "edit_case", "case", case_id,
-        {"field": field_attr, "old": old_value, "new": new_value},
-    )
+    if user:
+        log_action(
+            user["id"], "edit_case", "case", case_id,
+            {"field": field_attr, "old": old_value, "new": new_value},
+        )
 
     await state.clear()
     await message.answer(
@@ -328,7 +329,8 @@ async def add_source_url(message: Message, state: FSMContext) -> None:
     try:
         case_id = await asyncio.to_thread(_save)
         user = get_user_by_tg_id(message.from_user.id)
-        log_action(user["id"], "add_case", "case", case_id, {"title": data["case_title"]})
+        if user:
+            log_action(user["id"], "add_case", "case", case_id, {"title": data["case_title"]})
         await state.clear()
         await message.answer(
             f"Кейс #{case_id} добавлен в базу знаний!\n\n"

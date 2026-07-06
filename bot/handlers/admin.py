@@ -84,13 +84,14 @@ async def cmd_promote(message: Message) -> None:
 
     set_role(target["telegram_id"], "admin")
     admin_user = get_user_by_tg_id(message.from_user.id)
-    log_action(
-        admin_user["id"],
-        action="promote",
-        target_type="user",
-        target_id=target["id"],
-        payload={"to": "admin"},
-    )
+    if admin_user:
+        log_action(
+            admin_user["id"],
+            action="promote",
+            target_type="user",
+            target_id=target["id"],
+            payload={"to": "admin"},
+        )
     await set_user_commands(message.bot, target["telegram_id"], "admin")
     await message.answer(f"✅ @{target_username} теперь администратор.")
 
@@ -127,13 +128,14 @@ async def cmd_demote(message: Message) -> None:
     old_role = target["role"]
     set_role(target["telegram_id"], "analyst")
     admin_user = get_user_by_tg_id(message.from_user.id)
-    log_action(
-        admin_user["id"],
-        action="demote",
-        target_type="user",
-        target_id=target["id"],
-        payload={"from": old_role, "to": "analyst"},
-    )
+    if admin_user:
+        log_action(
+            admin_user["id"],
+            action="demote",
+            target_type="user",
+            target_id=target["id"],
+            payload={"from": old_role, "to": "analyst"},
+        )
     await set_user_commands(message.bot, target["telegram_id"], "analyst")
     await message.answer(f"✅ @{target_username} теперь аналитик.")
 

@@ -89,7 +89,8 @@ async def cmd_collect(message: Message) -> None:
         )
 
         user = get_user_by_tg_id(message.from_user.id)
-        log_action(user["id"], "collect", payload={"days": days, "saved": total_saved})
+        if user:
+            log_action(user["id"], "collect", payload={"days": days, "saved": total_saved})
 
         await message.answer("\n".join(lines))
 
@@ -114,7 +115,8 @@ async def cmd_process(message: Message) -> None:
         result = await asyncio.to_thread(_process)
 
         user = get_user_by_tg_id(message.from_user.id)
-        log_action(user["id"], "process", payload={"created": result.created})
+        if user:
+            log_action(user["id"], "process", payload={"created": result.created})
 
         await message.answer(
             "<b>Обработка завершена</b>\n\n"
@@ -168,7 +170,8 @@ async def cmd_enrich(message: Message) -> None:
         result = await asyncio.to_thread(_enrich)
 
         user = get_user_by_tg_id(message.from_user.id)
-        log_action(user["id"], "enrich", payload={"cases_created": result.cases_created})
+        if user:
+            log_action(user["id"], "enrich", payload={"cases_created": result.cases_created})
 
         await message.answer(
             "<b>Обогащение завершено</b>\n\n"
@@ -214,7 +217,8 @@ async def cmd_digest(message: Message) -> None:
         path = Path(result.output_path)
 
         user = get_user_by_tg_id(message.from_user.id)
-        log_action(user["id"], "digest", payload={"days": days, "cases": result.total_cases})
+        if user:
+            log_action(user["id"], "digest", payload={"days": days, "cases": result.total_cases})
 
         await message.answer(
             f"<b>Дайджест готов</b>\n\n"
@@ -276,7 +280,8 @@ async def cmd_export(message: Message) -> None:
         file_size_mb = Path(path).stat().st_size / (1024 * 1024)
 
         user = get_user_by_tg_id(message.from_user.id)
-        log_action(user["id"], "export", payload={"days": days, "size_mb": round(file_size_mb, 2)})
+        if user:
+            log_action(user["id"], "export", payload={"days": days, "size_mb": round(file_size_mb, 2)})
 
         if file_size_mb > 48:
             await message.answer(
