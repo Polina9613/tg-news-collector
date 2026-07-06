@@ -9,11 +9,11 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 from loguru import logger
-from sqlalchemy import and_, nullslast, or_
+from sqlalchemy import or_
 
 from db.base import get_session
 from db.models import NewsCard, Trend, TrendCase
-from digest.llm_digest import get_topic_intro, get_top5
+from digest.llm_digest import get_top5
 from llm.call_logger import llm_call_context
 
 COLOR_GREEN = RGBColor(0x1D, 0x9E, 0x75)
@@ -35,7 +35,7 @@ def generate_digest(
     provider,
     days: int = 7,
     output_path: str | None = None,
-    max_cases: int = 15,
+    max_cases: int = 50,
 ) -> DigestResult:
     period_end = datetime.utcnow()
     period_start = period_end - timedelta(days=days)
@@ -53,16 +53,27 @@ def generate_digest(
         top5 = get_top5(provider, cases) if cases else []
     time.sleep(5)
 
-    top5_titles = {t.get("case_title", "").lower() for t in top5}
-    filtered_cases = [c for c in cases if c.get("case_title", "").lower() not in top5_titles]
-    topics = _group_by_topic(filtered_cases)
+    # Дедупликация по source_url и по паре company|первые-3-слова-заголовка
+    top5_signatures: set[str] = set()
+    for t in top5:
+        if t.get("source_url"):
+            top5_signatures.add(t["source_url"].strip().rstrip("/"))
+        title_key = " ".join((t.get("case_title") or "").lower().split()[:3])
+        company_key = (t.get("company") or "").lower()
+        if title_key:
+            top5_signatures.add(f"{company_key}|{title_key}")
 
-    topic_intros: dict[str, str] = {}
-    with llm_call_context("get_all_topic_intros", context_note=f"digest: {period_start.date()}"):
-        for topic, tcases in topics.items():
-            logger.info(f"LLM: intro for {topic}...")
-            topic_intros[topic] = get_topic_intro(provider, topic, tcases)
-            time.sleep(5)
+    def _is_in_top5(case: dict) -> bool:
+        if case.get("source_url") and case["source_url"].strip().rstrip("/") in top5_signatures:
+            return True
+        title_key = " ".join((case.get("case_title") or "").lower().split()[:3])
+        company_key = (case.get("company") or "").lower()
+        return f"{company_key}|{title_key}" in top5_signatures
+
+    cases_for_topics = [c for c in cases if not _is_in_top5(c)]
+    topics = _group_by_topic(cases_for_topics)
+
+    topic_intros: dict[str, str] = {}  # интро не генерируются — кейсы идут сразу после заголовка
 
     doc = _build_docx(period_start, period_end, top5, topics, topic_intros)
     doc.save(output_path)
@@ -85,15 +96,18 @@ def _load_cases(since: datetime, limit: int) -> list[dict]:
             .outerjoin(Trend, TrendCase.trend_id == Trend.id)
             .filter(
                 or_(
-                    and_(
-                        NewsCard.published_at >= since,
-                        NewsCard.relevance_label.in_(["high", "medium"]),
-                    ),
-                    TrendCase.news_card_id == None,  # noqa: E711
+                    NewsCard.published_at >= since,
+                    TrendCase.created_at >= since,  # ручные кейсы без NewsCard
+                )
+            )
+            .filter(
+                or_(
+                    NewsCard.relevance_score >= 85,
+                    NewsCard.id == None,  # noqa: E711  — ручные кейсы
                 )
             )
             .filter(TrendCase.is_duplicate == False)  # noqa: E712
-            .order_by(nullslast(NewsCard.relevance_score.desc()))
+            .order_by(NewsCard.relevance_score.desc().nullslast())
             .limit(limit)
             .all()
         )
