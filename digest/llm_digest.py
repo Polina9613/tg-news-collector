@@ -71,7 +71,7 @@ def get_facts(provider, cases: list[dict]) -> list[dict]:
 def _format_cases(cases: list[dict]) -> str:
     lines = []
     for i, c in enumerate(cases, 1):
-        lines.append(f"{i}. {c.get('case_title', 'Без названия')} [{c.get('source_title', '')}]")
+        lines.append(f"{i}. {c.get('case_title') or 'Без названия'} [{c.get('source_title') or ''}]")
         if c.get("description"):
             lines.append(f"   {c['description']}")
         if c.get("value"):

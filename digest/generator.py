@@ -134,7 +134,7 @@ def _group_by_topic(cases: list[dict]) -> dict[str, list[dict]]:
     seen: set[str] = set()
     groups: dict[str, list] = {}
     for c in cases:
-        key = (c.get("case_title", "") + c.get("company", "")).lower()
+        key = ((c.get("case_title") or "") + (c.get("company") or "")).lower()
         if key in seen:
             continue
         seen.add(key)
