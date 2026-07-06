@@ -116,6 +116,16 @@ class GroqProvider:
         return False
 
     def _call(self, system: str, user: str, retry: int = 0, max_tokens: int = 1500) -> str:
+        from time import perf_counter
+        from llm.call_logger import log_llm_call
+
+        prompt_chars = len(system) + len(user)
+        start = perf_counter()
+        response_content = ""
+        usage: dict = {}
+        success = True
+        error_message = None
+
         try:
             response = httpx.post(
                 GROQ_API_URL,
@@ -135,17 +145,43 @@ class GroqProvider:
                 timeout=self.timeout,
             )
             response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
+            data = response.json()
+            usage = data.get("usage", {}) or {}
+            content = data["choices"][0]["message"]["content"]
             if not content:
                 raise ValueError("Empty response from Groq API")
-            return content.strip()
+            response_content = content.strip()
+            return response_content
+
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429 and retry < 3:
+                success = False
+                error_message = f"rate_limit (retry {retry + 1}/3)"
                 wait = 60 * (retry + 1)
                 logger.warning(f"Rate limit hit, waiting {wait}s (retry {retry + 1}/3)")
                 time.sleep(wait)
                 return self._call(system, user, retry=retry + 1, max_tokens=max_tokens)
+            success = False
+            error_message = str(e)[:500]
             raise
+
+        except Exception as e:
+            success = False
+            error_message = str(e)[:500]
+            raise
+
+        finally:
+            duration_ms = int((perf_counter() - start) * 1000)
+            log_llm_call(
+                provider="groq",
+                model=self.model,
+                prompt_chars=prompt_chars,
+                response_chars=len(response_content),
+                duration_ms=duration_ms,
+                usage=usage,
+                success=success,
+                error_message=error_message,
+            )
 
     # ══════════════════════════════════════════════════════════════════════
     # СТУПЕНЬ 1 — Релевантность

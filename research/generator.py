@@ -8,6 +8,7 @@ from loguru import logger
 
 from db.base import get_session
 from db.models import Trend, TrendCase
+from llm.call_logger import llm_call_context
 from research.llm_research import generate_research_synthesis, resolve_query_to_trends
 
 
@@ -100,7 +101,8 @@ def generate_research(
     all_trends = _load_active_trends_list()
 
     logger.info(f"Research: resolving query '{query}' to trends...")
-    trend_ids = resolve_query_to_trends(provider, query, all_trends)
+    with llm_call_context("resolve_query_to_trends", context_note=f"research: {query[:50]}"):
+        trend_ids = resolve_query_to_trends(provider, query, all_trends)
 
     if not trend_ids:
         logger.warning(f"Research: no matching trends for query '{query}'")
@@ -115,7 +117,8 @@ def generate_research(
         return None
 
     logger.info(f"Research: {len(cases)} cases found, generating synthesis...")
-    synthesis = generate_research_synthesis(provider, query, cases)
+    with llm_call_context("generate_research_synthesis", context_note=f"research: {query[:50]}"):
+        synthesis = generate_research_synthesis(provider, query, cases)
 
     if not output_path:
         Path("data/research").mkdir(parents=True, exist_ok=True)

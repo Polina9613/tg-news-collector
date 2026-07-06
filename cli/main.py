@@ -687,6 +687,86 @@ def llm_check() -> None:
         raise typer.Exit(code=1)
 
 
+@app.command(name="llm-stats")
+def llm_stats_cmd(
+    hours: int = typer.Option(24, "--hours", "-h", help="За сколько часов"),
+) -> None:
+    """Статистика LLM-вызовов за период."""
+    _safe_setup_logging()
+    from datetime import timedelta
+    from sqlalchemy import func
+    from db.base import get_session
+    from db.models import LLMCallLog
+
+    since = datetime.utcnow() - timedelta(hours=hours)
+
+    with get_session() as s:
+        base_q = s.query(LLMCallLog).filter(LLMCallLog.called_at >= since)
+        total_calls = base_q.count()
+        if not total_calls:
+            typer.echo(f"За последние {hours}ч LLM-вызовов не было.")
+            return
+
+        total_success = base_q.filter(LLMCallLog.success == True).count()  # noqa: E712
+        total_failed = total_calls - total_success
+
+        by_method = (
+            s.query(
+                LLMCallLog.method,
+                func.count(LLMCallLog.id).label("calls"),
+                func.sum(LLMCallLog.total_tokens).label("tokens"),
+                func.avg(LLMCallLog.duration_ms).label("avg_ms"),
+            )
+            .filter(LLMCallLog.called_at >= since)
+            .group_by(LLMCallLog.method)
+            .order_by(func.sum(LLMCallLog.total_tokens).desc())
+            .all()
+        )
+
+        total_tokens = (
+            s.query(func.sum(LLMCallLog.total_tokens))
+            .filter(LLMCallLog.called_at >= since)
+            .scalar() or 0
+        )
+        total_cache_hit = (
+            s.query(func.sum(LLMCallLog.cache_hit_tokens))
+            .filter(LLMCallLog.called_at >= since)
+            .scalar() or 0
+        )
+        total_cache_miss = (
+            s.query(func.sum(LLMCallLog.cache_miss_tokens))
+            .filter(LLMCallLog.called_at >= since)
+            .scalar() or 0
+        )
+
+    typer.echo(f"\n{'═' * 78}")
+    typer.echo(f"  LLM статистика за последние {hours}ч")
+    typer.echo(f"{'═' * 78}")
+    typer.echo(
+        f"  Всего вызовов:   {total_calls} "
+        f"(успешных: {total_success}, упало: {total_failed})"
+    )
+    if total_tokens:
+        typer.echo(f"  Всего токенов:   {total_tokens:,}")
+    else:
+        typer.echo("  Всего токенов:   n/a")
+    if total_cache_hit + total_cache_miss > 0:
+        cache_pct = int(total_cache_hit / (total_cache_hit + total_cache_miss) * 100)
+        typer.echo(
+            f"  Cache hit:       {cache_pct}% "
+            f"({total_cache_hit:,} / {total_cache_hit + total_cache_miss:,})"
+        )
+
+    typer.echo(f"\n{'Метод':<38} {'Вызовов':>8} {'Токенов':>12} {'Ср.мс':>7}")
+    typer.echo(f"{'─' * 78}")
+    for row in by_method:
+        tokens_str = f"{int(row.tokens):,}" if row.tokens else "n/a"
+        avg_ms = int(row.avg_ms or 0)
+        typer.echo(f"  {row.method:<36} {row.calls:>8} {tokens_str:>12} {avg_ms:>7}")
+
+    typer.echo(f"{'═' * 78}\n")
+
+
 @app.command()
 def bot() -> None:
     """Запустить Telegram-бота."""

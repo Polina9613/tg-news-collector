@@ -152,6 +152,16 @@ class YandexProvider:
         Отправляет запрос к Yandex AI Studio через OpenAI-совместимый эндпоинт.
         Авторизация: Api-Key (не Bearer).
         """
+        from time import perf_counter
+        from llm.call_logger import log_llm_call
+
+        prompt_chars = len(system) + len(user)
+        start = perf_counter()
+        response_content = ""
+        usage: dict = {}
+        success = True
+        error_message = None
+
         try:
             response = httpx.post(
                 YANDEX_API_URL,
@@ -171,31 +181,60 @@ class YandexProvider:
                 timeout=self.timeout,
             )
             response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
+            data = response.json()
+            usage = data.get("usage", {}) or {}
+            content = data["choices"][0]["message"]["content"]
             if not content:
                 raise ValueError("Empty response from Yandex API")
-            return content.strip()
+            response_content = content.strip()
+            return response_content
 
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
             body = e.response.text[:300]
             if status == 429 and retry < 3:
+                success = False
+                error_message = f"rate_limit (retry {retry + 1}/3)"
                 wait = 60 * (retry + 1)
                 logger.warning(f"Yandex rate limit, waiting {wait}s (retry {retry + 1}/3)")
                 time.sleep(wait)
                 return self._call(system, user, retry=retry + 1, max_tokens=max_tokens)
             if status == 401:
                 logger.error("Yandex API auth error: check YANDEX_API_KEY and YANDEX_FOLDER_ID")
-                raise
-            logger.error(f"Yandex API error {status}: {body}")
+            else:
+                logger.error(f"Yandex API error {status}: {body}")
+            success = False
+            error_message = str(e)[:500]
             raise
 
         except httpx.ReadTimeout:
             if retry < 2:
+                success = False
+                error_message = f"timeout (retry {retry + 1}/2)"
                 logger.warning(f"Yandex timeout, retry {retry + 1}/2")
                 time.sleep(5)
                 return self._call(system, user, retry=retry + 1, max_tokens=max_tokens)
+            success = False
+            error_message = "ReadTimeout"
             raise
+
+        except Exception as e:
+            success = False
+            error_message = str(e)[:500]
+            raise
+
+        finally:
+            duration_ms = int((perf_counter() - start) * 1000)
+            log_llm_call(
+                provider="yandex",
+                model=self.model,
+                prompt_chars=prompt_chars,
+                response_chars=len(response_content),
+                duration_ms=duration_ms,
+                usage=usage,
+                success=success,
+                error_message=error_message,
+            )
 
     # ══════════════════════════════════════════════════════════════════════
     # СТУПЕНЬ 1 — Релевантность

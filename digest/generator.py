@@ -14,6 +14,7 @@ from loguru import logger
 from db.base import get_session
 from db.models import NewsCard, TrendCase
 from digest.llm_digest import get_facts, get_topic_intro, get_top5
+from llm.call_logger import llm_call_context
 
 COLOR_GREEN = RGBColor(0x1D, 0x9E, 0x75)
 COLOR_DARK = RGBColor(0x2C, 0x2C, 0x2A)
@@ -50,18 +51,21 @@ def generate_digest(
     topics = _group_by_topic(cases)
 
     logger.info("LLM: top-5...")
-    top5 = get_top5(provider, cases) if cases else []
+    with llm_call_context("get_top5", context_note=f"digest: {period_start.date()}"):
+        top5 = get_top5(provider, cases) if cases else []
     time.sleep(5)
 
     logger.info("LLM: facts...")
-    facts = get_facts(provider, cases) if cases else []
+    with llm_call_context("get_facts", context_note=f"digest: {period_start.date()}"):
+        facts = get_facts(provider, cases) if cases else []
     time.sleep(5)
 
     topic_intros: dict[str, str] = {}
-    for topic, tcases in topics.items():
-        logger.info(f"LLM: intro for {topic}...")
-        topic_intros[topic] = get_topic_intro(provider, topic, tcases)
-        time.sleep(5)
+    with llm_call_context("get_all_topic_intros", context_note=f"digest: {period_start.date()}"):
+        for topic, tcases in topics.items():
+            logger.info(f"LLM: intro for {topic}...")
+            topic_intros[topic] = get_topic_intro(provider, topic, tcases)
+            time.sleep(5)
 
     doc = _build_docx(period_start, period_end, top5, facts, topics, topic_intros)
     doc.save(output_path)

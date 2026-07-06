@@ -10,6 +10,7 @@ from db.base import get_session
 from db.models import NewsCard, Trend, TrendCase, get_period_label
 from processor.prefilter import should_skip_llm
 from processor.early_dedup import find_early_duplicate
+from llm.call_logger import llm_call_context
 
 _EMOJI_DECORATION = re.compile(
     r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E0-\U0001F1FF]{2,}"
@@ -268,7 +269,8 @@ def enrich_news_cards(
                 text = _prepare_text(card)
 
                 # ── Ступень 1+2: релевантность и классификация (1 вызов) ──
-                rc = _llm_call_with_fallback("check_relevance_and_classify", text, channel_context)
+                with llm_call_context("check_relevance_and_classify", news_card_id=card.id):
+                    rc = _llm_call_with_fallback("check_relevance_and_classify", text, channel_context)
 
                 if card.relevance_score >= HIGH_CONFIDENCE_SCORE:
                     # Rule-based score very high — trust it for relevance.
@@ -304,14 +306,16 @@ def enrich_news_cards(
                 # ── Ступень 3: кейс → извлечение + привязка к тренду ─────
                 time.sleep(6)
                 source_url = card.source_url or card.post_url
-                cases_data = _llm_call_with_fallback("extract_cases", text, source_url, channel_context)
+                with llm_call_context("extract_cases", news_card_id=card.id):
+                    cases_data = _llm_call_with_fallback("extract_cases", text, source_url, channel_context)
                 logger.debug(f"  → extracted {len(cases_data)} case(s)")
 
                 for case_data in cases_data:
                     time.sleep(5)
 
                     # Привязка к тренду
-                    trend_decision = _llm_call_with_fallback("assign_trend", case_data, active_trends)
+                    with llm_call_context("assign_trend", news_card_id=card.id):
+                        trend_decision = _llm_call_with_fallback("assign_trend", case_data, active_trends)
                     decision = trend_decision.get("decision", "none")
                     trend_id = None
 

@@ -182,3 +182,32 @@ class AuditLog(Base):
         return f"<AuditLog action={self.action!r} target={self.target_type}#{self.target_id}>"
 
 
+class LLMCallLog(Base):
+    """Лог каждого вызова LLM. Используется для анализа расхода токенов."""
+    __tablename__ = "llm_call_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    called_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, index=True)
+
+    provider: Mapped[str]
+    model: Mapped[str]
+    method: Mapped[str]
+
+    news_card_id: Mapped[int | None] = mapped_column(default=None, index=True)
+    trend_case_id: Mapped[int | None] = mapped_column(default=None)
+    context_note: Mapped[str | None] = mapped_column(default=None)
+
+    prompt_chars: Mapped[int] = mapped_column(default=0)
+    response_chars: Mapped[int] = mapped_column(default=0)
+
+    prompt_tokens: Mapped[int | None] = mapped_column(default=None)
+    completion_tokens: Mapped[int | None] = mapped_column(default=None)
+    total_tokens: Mapped[int | None] = mapped_column(default=None)
+    cache_hit_tokens: Mapped[int | None] = mapped_column(default=None)
+    cache_miss_tokens: Mapped[int | None] = mapped_column(default=None)
+
+    duration_ms: Mapped[int] = mapped_column(default=0)
+
+    success: Mapped[bool] = mapped_column(default=True)
+    error_message: Mapped[str | None] = mapped_column(default=None)
+

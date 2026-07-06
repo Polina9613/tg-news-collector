@@ -2,7 +2,7 @@ from loguru import logger
 from sqlalchemy import func, select, text
 
 from db.base import Base, engine, get_session
-from db.models import AuditLog, BotUser, NewsCard, RawPost, Source, Trend, TrendCase  # noqa: F401 — registers all models with Base
+from db.models import AuditLog, BotUser, LLMCallLog, NewsCard, RawPost, Source, Trend, TrendCase  # noqa: F401 — registers all models with Base
 
 
 def migrate_add_url_fields() -> None:
@@ -136,6 +136,14 @@ def migrate_remove_subscriptions() -> None:
         conn.execute(text("ALTER TABLE bot_users_new RENAME TO bot_users"))
         conn.commit()
         logger.info("Migration: removed subscriptions table, subscriber→analyst")
+
+
+def migrate_llm_call_logs() -> None:
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    if "llm_call_logs" not in inspector.get_table_names():
+        LLMCallLog.__table__.create(engine)
+        logger.info("Migration: created llm_call_logs table")
 
 
 def migrate_add_retry_after() -> None:
@@ -330,6 +338,7 @@ def init_db() -> None:
     migrate_add_source_topics()
     migrate_trends_v2()
     migrate_add_retry_after()
+    migrate_llm_call_logs()
 
 
 def get_db_stats() -> dict:
