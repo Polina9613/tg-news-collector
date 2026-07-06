@@ -1,4 +1,3 @@
-import json
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -10,10 +9,11 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 from loguru import logger
+from sqlalchemy import and_, nullslast, or_
 
 from db.base import get_session
-from db.models import NewsCard, TrendCase
-from digest.llm_digest import get_facts, get_topic_intro, get_top5
+from db.models import NewsCard, Trend, TrendCase
+from digest.llm_digest import get_topic_intro, get_top5
 from llm.call_logger import llm_call_context
 
 COLOR_GREEN = RGBColor(0x1D, 0x9E, 0x75)
@@ -48,17 +48,14 @@ def generate_digest(
     cases = _load_cases(period_start, max_cases)
     logger.info(f"Digest: {len(cases)} cases, period {period_start.date()}–{period_end.date()}")
 
-    topics = _group_by_topic(cases)
-
     logger.info("LLM: top-5...")
     with llm_call_context("get_top5", context_note=f"digest: {period_start.date()}"):
         top5 = get_top5(provider, cases) if cases else []
     time.sleep(5)
 
-    logger.info("LLM: facts...")
-    with llm_call_context("get_facts", context_note=f"digest: {period_start.date()}"):
-        facts = get_facts(provider, cases) if cases else []
-    time.sleep(5)
+    top5_titles = {t.get("case_title", "").lower() for t in top5}
+    filtered_cases = [c for c in cases if c.get("case_title", "").lower() not in top5_titles]
+    topics = _group_by_topic(filtered_cases)
 
     topic_intros: dict[str, str] = {}
     with llm_call_context("get_all_topic_intros", context_note=f"digest: {period_start.date()}"):
@@ -67,7 +64,7 @@ def generate_digest(
             topic_intros[topic] = get_topic_intro(provider, topic, tcases)
             time.sleep(5)
 
-    doc = _build_docx(period_start, period_end, top5, facts, topics, topic_intros)
+    doc = _build_docx(period_start, period_end, top5, topics, topic_intros)
     doc.save(output_path)
     logger.info(f"Digest saved: {output_path}")
 
@@ -83,52 +80,62 @@ def generate_digest(
 def _load_cases(since: datetime, limit: int) -> list[dict]:
     with get_session() as session:
         rows = (
-            session.query(TrendCase, NewsCard)
-            .join(NewsCard, TrendCase.news_card_id == NewsCard.id)
-            .filter(NewsCard.published_at >= since)
-            .filter(NewsCard.relevance_label.in_(["high", "medium"]))
-            .order_by(NewsCard.relevance_score.desc())
+            session.query(TrendCase, NewsCard, Trend)
+            .outerjoin(NewsCard, TrendCase.news_card_id == NewsCard.id)
+            .outerjoin(Trend, TrendCase.trend_id == Trend.id)
+            .filter(
+                or_(
+                    and_(
+                        NewsCard.published_at >= since,
+                        NewsCard.relevance_label.in_(["high", "medium"]),
+                    ),
+                    TrendCase.news_card_id == None,  # noqa: E711
+                )
+            )
+            .filter(TrendCase.is_duplicate == False)  # noqa: E712
+            .order_by(nullslast(NewsCard.relevance_score.desc()))
             .limit(limit)
             .all()
         )
         return [
             {
-                "trend_name": tc.trend_name,
+                "trend_name": tc.trend_name or (tr.name if tr else ""),
+                "trend_category": tr.category if tr else "",
                 "case_title": tc.case_title,
                 "company": tc.company,
                 "description": tc.description,
                 "how_it_works": tc.how_it_works,
                 "value": tc.value,
-                "source_url": tc.source_url or nc.post_url,
-                "source_title": nc.source_title,
+                "source_url": tc.source_url or (nc.post_url if nc else None),
+                "source_title": nc.source_title if nc else "",
                 "market": tc.market,
-                "topics": nc.topics,
-                "relevance_score": nc.relevance_score,
+                "industry": tc.industry,
+                "relevance_score": nc.relevance_score if nc else 0,
             }
-            for tc, nc in rows
+            for tc, nc, tr in rows
         ]
 
 
 def _group_by_topic(cases: list[dict]) -> dict[str, list[dict]]:
+    seen: set[str] = set()
     groups: dict[str, list] = {}
     for c in cases:
-        try:
-            topics = json.loads(c.get("topics") or "[]")
-            topic = topics[0] if topics else "Общее"
-        except Exception:
-            topic = "Общее"
+        key = (c.get("case_title", "") + c.get("company", "")).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        topic = c.get("trend_category") or c.get("industry") or "Общее"
         groups.setdefault(topic, []).append(c)
     return dict(sorted(groups.items(), key=lambda x: -len(x[1])))
 
 
 # ── Сборка документа ─────────────────────────────────────────────
 
-def _build_docx(period_start, period_end, top5, facts, topics, topic_intros) -> Document:
+def _build_docx(period_start, period_end, top5, topics, topic_intros) -> Document:
     doc = Document()
     _setup_page(doc)
     _add_cover(doc, period_start, period_end, sum(len(v) for v in topics.values()), len(topics))
     _add_top5_section(doc, top5)
-    _add_facts_section(doc, facts)
     _add_topics_section(doc, topics, topic_intros)
     _add_sources_section(doc, topics)
     return doc
@@ -213,7 +220,7 @@ def _add_top5_section(doc, top5: list[dict]) -> None:
         ph = doc.add_paragraph()
         rnum = ph.add_run(f"{i}.  ")
         rnum.font.color.rgb = COLOR_GREEN; rnum.font.bold = True; rnum.font.size = Pt(11)
-        rtitle = ph.add_run(item.get("title", ""))
+        rtitle = ph.add_run(item.get("case_title") or item.get("title", ""))
         rtitle.font.bold = True; rtitle.font.size = Pt(11)
 
         ps = doc.add_paragraph(item.get("summary", ""))
@@ -229,18 +236,6 @@ def _add_top5_section(doc, top5: list[dict]) -> None:
 
         doc.add_paragraph()
 
-
-def _add_facts_section(doc, facts: list[dict]) -> None:
-    if not facts:
-        return
-    _add_heading(doc, "Цифры и факты", 1)
-    for f in facts:
-        p = doc.add_paragraph()
-        rf = p.add_run(f.get("fact", "") + "  —  ")
-        rf.font.bold = True; rf.font.color.rgb = COLOR_GREEN; rf.font.size = Pt(10)
-        rc = p.add_run(f.get("context", ""))
-        rc.font.size = Pt(10); rc.font.color.rgb = COLOR_DARK
-    doc.add_paragraph()
 
 
 def _add_topics_section(doc, topics, topic_intros) -> None:
