@@ -1,4 +1,3 @@
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -13,8 +12,7 @@ from sqlalchemy import or_
 
 from db.base import get_session
 from db.models import NewsCard, Trend, TrendCase
-from digest.llm_digest import get_top5
-from llm.call_logger import llm_call_context
+from digest.llm_digest import generate_digest_analysis
 
 COLOR_GREEN = RGBColor(0x1D, 0x9E, 0x75)
 COLOR_DARK = RGBColor(0x2C, 0x2C, 0x2A)
@@ -48,34 +46,18 @@ def generate_digest(
     cases = _load_cases(period_start, max_cases)
     logger.info(f"Digest: {len(cases)} cases, period {period_start.date()}–{period_end.date()}")
 
-    logger.info("LLM: top-5...")
-    with llm_call_context("get_top5", context_note=f"digest: {period_start.date()}"):
-        top5 = get_top5(provider, cases) if cases else []
-    time.sleep(5)
+    topics = _group_by_topic(cases)
 
-    # Дедупликация по source_url и по паре company|первые-3-слова-заголовка
-    top5_signatures: set[str] = set()
-    for t in top5:
-        if t.get("source_url"):
-            top5_signatures.add(t["source_url"].strip().rstrip("/"))
-        title_key = " ".join((t.get("case_title") or "").lower().split()[:3])
-        company_key = (t.get("company") or "").lower()
-        if title_key:
-            top5_signatures.add(f"{company_key}|{title_key}")
+    top_cases_for_context = sorted(
+        cases, key=lambda c: c.get("relevance_score", 0), reverse=True
+    )[:15]
 
-    def _is_in_top5(case: dict) -> bool:
-        if case.get("source_url") and case["source_url"].strip().rstrip("/") in top5_signatures:
-            return True
-        title_key = " ".join((case.get("case_title") or "").lower().split()[:3])
-        company_key = (case.get("company") or "").lower()
-        return f"{company_key}|{title_key}" in top5_signatures
+    logger.info("LLM: единый аналитический вызов (главное + выводы по темам + векторы)...")
+    analysis = generate_digest_analysis(provider, top_cases_for_context, topics) if cases else {
+        "main_summary": "", "topic_conclusions": {}, "overall_conclusions": []
+    }
 
-    cases_for_topics = [c for c in cases if not _is_in_top5(c)]
-    topics = _group_by_topic(cases_for_topics)
-
-    topic_intros: dict[str, str] = {}  # интро не генерируются — кейсы идут сразу после заголовка
-
-    doc = _build_docx(period_start, period_end, top5, topics, topic_intros)
+    doc = _build_docx(period_start, period_end, analysis, topics)
     doc.save(output_path)
     logger.info(f"Digest saved: {output_path}")
 
@@ -97,7 +79,7 @@ def _load_cases(since: datetime, limit: int) -> list[dict]:
             .filter(
                 or_(
                     NewsCard.published_at >= since,
-                    TrendCase.created_at >= since,  # ручные кейсы без NewsCard
+                    TrendCase.created_at >= since,
                 )
             )
             .filter(
@@ -145,13 +127,39 @@ def _group_by_topic(cases: list[dict]) -> dict[str, list[dict]]:
 
 # ── Сборка документа ─────────────────────────────────────────────
 
-def _build_docx(period_start, period_end, top5, topics, topic_intros) -> Document:
+def _build_docx(period_start, period_end, analysis: dict, topics: dict) -> Document:
     doc = Document()
     _setup_page(doc)
     _add_cover(doc, period_start, period_end, sum(len(v) for v in topics.values()), len(topics))
-    _add_top5_section(doc, top5)
-    _add_topics_section(doc, topics, topic_intros)
+
+    # ── Главное за неделю ──────────────────────────────────────────
+    _add_heading(doc, "Главное за неделю", 1)
+    main_summary = analysis.get("main_summary", "")
+    if main_summary:
+        for paragraph_text in main_summary.split("\n\n"):
+            if paragraph_text.strip():
+                p = doc.add_paragraph(paragraph_text.strip())
+                for run in p.runs:
+                    run.font.size = Pt(10)
+    else:
+        doc.add_paragraph("Недостаточно данных для обзора.")
+
+    # ── Новости по темам ───────────────────────────────────────────
+    _add_topics_section(doc, topics, analysis.get("topic_conclusions", {}))
+
+    # ── Выводы и векторы изменений ─────────────────────────────────
+    overall = analysis.get("overall_conclusions", [])
+    if overall:
+        _add_heading(doc, "Выводы и векторы изменений", 1)
+        for point in overall:
+            pb = doc.add_paragraph()
+            pb.paragraph_format.left_indent = Cm(0.5)
+            run = pb.add_run(f"• {point}")
+            run.font.size = Pt(10)
+
+    # ── Источники ───────────────────────────────────────────────────
     _add_sources_section(doc, topics)
+
     return doc
 
 
@@ -225,43 +233,18 @@ def _add_cover(doc, start, end, n_cases, n_topics) -> None:
     _add_hline(doc)
 
 
-def _add_top5_section(doc, top5: list[dict]) -> None:
-    _add_heading(doc, "Главное за неделю", 1)
-    if not top5:
-        doc.add_paragraph("Нет данных за период.")
-        return
-    for i, item in enumerate(top5, 1):
-        ph = doc.add_paragraph()
-        rnum = ph.add_run(f"{i}.  ")
-        rnum.font.color.rgb = COLOR_GREEN; rnum.font.bold = True; rnum.font.size = Pt(11)
-        rtitle = ph.add_run(item.get("case_title") or item.get("title", ""))
-        rtitle.font.bold = True; rtitle.font.size = Pt(11)
-
-        ps = doc.add_paragraph(item.get("summary", ""))
-        ps.paragraph_format.left_indent = Cm(0.7)
-        for run in ps.runs:
-            run.font.size = Pt(10); run.font.color.rgb = COLOR_DARK
-
-        if item.get("source") or item.get("url"):
-            pl = doc.add_paragraph()
-            pl.paragraph_format.left_indent = Cm(0.7)
-            rl = pl.add_run(f"Источник: {item.get('source', '')}  {item.get('url', '')}")
-            rl.font.size = Pt(8); rl.font.color.rgb = COLOR_LIGHT; rl.italic = True
-
-        doc.add_paragraph()
-
-
-
-def _add_topics_section(doc, topics, topic_intros) -> None:
+def _add_topics_section(doc, topics: dict, topic_conclusions: dict) -> None:
     _add_heading(doc, "Новости по темам", 1)
     for topic, cases in topics.items():
         _add_heading(doc, topic, 2)
-        intro = topic_intros.get(topic, "")
-        if intro:
-            pi = doc.add_paragraph(intro)
+        conclusion = topic_conclusions.get(topic, "")
+        if conclusion:
+            pi = doc.add_paragraph()
             pi.paragraph_format.space_after = Pt(8)
-            for run in pi.runs:
-                run.font.size = Pt(10); run.font.color.rgb = COLOR_DARK; run.italic = True
+            run = pi.add_run(conclusion)
+            run.font.size = Pt(10)
+            run.font.color.rgb = COLOR_DARK
+            run.italic = True
         for c in cases:
             _add_case(doc, c)
 

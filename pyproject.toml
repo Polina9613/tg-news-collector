@@ -39,7 +39,7 @@ dev = [
 tg-news = "cli.main:app"
 
 [tool.setuptools.packages.find]
-include = ["bot", "cli", "collector", "config", "db", "digest", "exporter", "llm", "processor"]
+include = ["bot", "cli", "collector", "config", "db", "digest", "exporter", "llm", "processor", "research"]
 
 [tool.ruff]
 line-length = 100

@@ -1,6 +1,6 @@
 """Tests for RSS collector: _parse_date, _entry_hash, load_rss_sources, collect_rss_source."""
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -163,9 +163,11 @@ class TestCollectRssSource:
             s.flush()
             src_id = src.id
 
+        recent_date = (datetime.utcnow() - timedelta(days=2)).timetuple()
+
         mock_feed = MagicMock()
         mock_feed.entries = [
-            _make_entry("entry-1", "Title", "Fintech text", (2026, 6, 29, 12, 0, 0, 0, 0, 0)),
+            _make_entry("entry-1", "Title", "Fintech text", recent_date),
         ]
         with patch("collector.rss.feedparser.parse", return_value=mock_feed), \
              patch("collector.rss.time.sleep"):
@@ -191,9 +193,11 @@ class TestCollectRssSource:
             )
             s.add(post)
 
+        recent_date = (datetime.utcnow() - timedelta(days=2)).timetuple()
+
         mock_feed = MagicMock()
         mock_feed.entries = [
-            _make_entry("dup-entry-1", "Dup", "text", (2026, 6, 29, 12, 0, 0, 0, 0, 0)),
+            _make_entry("dup-entry-1", "Dup", "text", recent_date),
         ]
         with patch("collector.rss.feedparser.parse", return_value=mock_feed), \
              patch("collector.rss.time.sleep"):
