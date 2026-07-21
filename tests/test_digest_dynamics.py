@@ -82,3 +82,57 @@ def test_no_snapshots_means_no_dynamics_call(tmp_path, monkeypatch):
     from digest.generator import _load_past_snapshots
     result = _load_past_snapshots(before=datetime.utcnow(), limit=3)
     assert result == []
+
+
+def test_load_past_snapshots_finds_prior_week_with_time_offset(tmp_path, monkeypatch):
+    """Регрессия: снимок с period_end чуть позже полуночи должен находиться
+    как 'прошлый' для дайджеста чей period_start = ровно полночь той же даты."""
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    import db.base
+    from db.base import init_engine
+    from db.models import Base
+    init_engine(f"sqlite:///{tmp_path}/test.db")
+    Base.metadata.create_all(db.base.engine)
+
+    from digest.generator import _load_past_snapshots, _save_weekly_snapshot
+
+    past_start = datetime(2026, 7, 7, 0, 0, 0)
+    past_end = datetime(2026, 7, 14, 9, 17, 26)  # точное время создания, не полночь
+
+    _save_weekly_snapshot(
+        past_start,
+        past_end,
+        {"main_summary": "Прошлая неделя", "overall_conclusions": ["Вывод"]},
+        {"Тема": [{"company": "X", "case_title": "Кейс"}]},
+    )
+
+    # period_start текущего дайджеста — ровно полночь той даты, на которую
+    # пришёлся past_end; строгое <= без запаса потеряло бы этот снимок
+    current_period_start = datetime(2026, 7, 14, 0, 0, 0)
+
+    result = _load_past_snapshots(before=current_period_start, limit=3)
+    assert len(result) == 1
+    assert result[0]["overall_conclusions"] == ["Вывод"]
+
+
+def test_save_weekly_snapshot_skips_duplicate(tmp_path, monkeypatch):
+    """Повторное сохранение снимка с тем же периодом не создаёт дубликат."""
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    import db.base
+    from db.base import init_engine
+    from db.models import Base, WeeklySnapshot
+    init_engine(f"sqlite:///{tmp_path}/test.db")
+    Base.metadata.create_all(db.base.engine)
+
+    from db.base import get_session
+    from digest.generator import _save_weekly_snapshot
+
+    start = datetime(2026, 7, 14, 0, 0, 0)
+    end = datetime(2026, 7, 21, 11, 0, 0)
+
+    _save_weekly_snapshot(start, end, {"main_summary": "A", "overall_conclusions": []}, {})
+    _save_weekly_snapshot(start, end, {"main_summary": "B", "overall_conclusions": []}, {})
+
+    with get_session() as s:
+        count = s.query(WeeklySnapshot).count()
+    assert count == 1

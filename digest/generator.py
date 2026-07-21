@@ -142,21 +142,34 @@ def _save_weekly_snapshot(
     analysis: dict,
     topics: dict[str, list[dict]],
 ) -> None:
-    """Сохраняет компактный снимок недели для будущего сравнения динамики."""
+    """Сохраняет компактный снимок недели. Пропускает если снимок уже существует."""
     import json
     from db.models import WeeklySnapshot
 
-    compact_index = []
-    for topic, cases in topics.items():
-        for case in cases:
-            compact_index.append({
-                "company": case.get("company") or "—",
-                "topic": topic,
-                "title": case.get("case_title", "")[:100],
-            })
-
     with get_session() as s:
-        snapshot = WeeklySnapshot(
+        existing = (
+            s.query(WeeklySnapshot)
+            .filter(WeeklySnapshot.period_start >= period_start - timedelta(hours=12))
+            .filter(WeeklySnapshot.period_start <= period_start + timedelta(hours=12))
+            .first()
+        )
+        if existing:
+            logger.info(
+                f"Weekly snapshot for {period_start.date()}–{period_end.date()} "
+                f"already exists (id={existing.id}), skipping duplicate save"
+            )
+            return
+
+        compact_index = []
+        for topic, cases in topics.items():
+            for case in cases:
+                compact_index.append({
+                    "company": case.get("company") or "—",
+                    "topic": topic,
+                    "title": case.get("case_title", "")[:100],
+                })
+
+        s.add(WeeklySnapshot(
             period_start=period_start,
             period_end=period_end,
             main_summary=analysis.get("main_summary", ""),
@@ -164,8 +177,7 @@ def _save_weekly_snapshot(
                 analysis.get("overall_conclusions", []), ensure_ascii=False
             ),
             compact_case_index=json.dumps(compact_index, ensure_ascii=False),
-        )
-        s.add(snapshot)
+        ))
     logger.info(
         f"Weekly snapshot saved: {period_start.date()}–{period_end.date()}, "
         f"{len(compact_index)} cases indexed"
@@ -173,14 +185,22 @@ def _save_weekly_snapshot(
 
 
 def _load_past_snapshots(before: datetime, limit: int = 3) -> list[dict]:
-    """Загружает последние N снимков ДО указанной даты (не включая текущий)."""
+    """Загружает последние N снимков ДО указанной даты (не включая текущий период).
+
+    Запас в 1 день защищает от ложного отсечения снимков чей period_end
+    чуть позже before из-за разницы во времени суток (period_end хранит
+    точное время создания, а before обычно округлён до полуночи).
+    """
     import json
     from db.models import WeeklySnapshot
+
+    cutoff = before + timedelta(days=1)
 
     with get_session() as s:
         snapshots = (
             s.query(WeeklySnapshot)
-            .filter(WeeklySnapshot.period_end <= before)
+            .filter(WeeklySnapshot.period_end <= cutoff)
+            .filter(WeeklySnapshot.period_start < before)  # исключаем текущую/будущую неделю
             .order_by(WeeklySnapshot.period_end.desc())
             .limit(limit)
             .all()
