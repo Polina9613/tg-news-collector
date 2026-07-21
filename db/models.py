@@ -182,6 +182,20 @@ class AuditLog(Base):
         return f"<AuditLog action={self.action!r} target={self.target_type}#{self.target_id}>"
 
 
+class WeeklySnapshot(Base):
+    """Компактный снимок дайджеста недели — для сравнения динамики между неделями."""
+    __tablename__ = "weekly_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    period_start: Mapped[datetime] = mapped_column(index=True)
+    period_end: Mapped[datetime] = mapped_column(index=True)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+    main_summary: Mapped[str | None] = mapped_column(default=None)
+    overall_conclusions: Mapped[str | None] = mapped_column(default=None)  # JSON-список строк
+    compact_case_index: Mapped[str | None] = mapped_column(default=None)   # JSON-список {company, topic, title}
+
+
 class LLMCallLog(Base):
     """Лог каждого вызова LLM. Используется для анализа расхода токенов."""
     __tablename__ = "llm_call_logs"

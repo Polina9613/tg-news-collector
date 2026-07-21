@@ -57,9 +57,33 @@ def generate_digest(
         "main_summary": "", "topic_conclusions": {}, "overall_conclusions": []
     }
 
+    # Динамика — сравнение с прошлыми неделями (если они есть)
+    past_snapshots = _load_past_snapshots(before=period_start, limit=3)
+
+    current_index = []
+    for topic, tcases in topics.items():
+        for case in tcases:
+            current_index.append({
+                "company": case.get("company") or "—",
+                "topic": topic,
+                "title": case.get("case_title", "")[:100],
+            })
+
+    dynamics_points: list[str] = []
+    if past_snapshots:
+        logger.info(f"LLM: dynamics section (comparing with {len(past_snapshots)} past weeks)...")
+        from digest.llm_digest import generate_dynamics_section
+        dynamics_points = generate_dynamics_section(
+            provider, current_index, analysis.get("overall_conclusions", []), past_snapshots
+        )
+
+    analysis["dynamics_points"] = dynamics_points
+
     doc = _build_docx(period_start, period_end, analysis, topics)
     doc.save(output_path)
     logger.info(f"Digest saved: {output_path}")
+
+    _save_weekly_snapshot(period_start, period_end, analysis, topics)
 
     return DigestResult(
         period_start=period_start,
@@ -112,6 +136,74 @@ def _load_cases(since: datetime, limit: int) -> list[dict]:
         ]
 
 
+def _save_weekly_snapshot(
+    period_start: datetime,
+    period_end: datetime,
+    analysis: dict,
+    topics: dict[str, list[dict]],
+) -> None:
+    """Сохраняет компактный снимок недели для будущего сравнения динамики."""
+    import json
+    from db.models import WeeklySnapshot
+
+    compact_index = []
+    for topic, cases in topics.items():
+        for case in cases:
+            compact_index.append({
+                "company": case.get("company") or "—",
+                "topic": topic,
+                "title": case.get("case_title", "")[:100],
+            })
+
+    with get_session() as s:
+        snapshot = WeeklySnapshot(
+            period_start=period_start,
+            period_end=period_end,
+            main_summary=analysis.get("main_summary", ""),
+            overall_conclusions=json.dumps(
+                analysis.get("overall_conclusions", []), ensure_ascii=False
+            ),
+            compact_case_index=json.dumps(compact_index, ensure_ascii=False),
+        )
+        s.add(snapshot)
+    logger.info(
+        f"Weekly snapshot saved: {period_start.date()}–{period_end.date()}, "
+        f"{len(compact_index)} cases indexed"
+    )
+
+
+def _load_past_snapshots(before: datetime, limit: int = 3) -> list[dict]:
+    """Загружает последние N снимков ДО указанной даты (не включая текущий)."""
+    import json
+    from db.models import WeeklySnapshot
+
+    with get_session() as s:
+        snapshots = (
+            s.query(WeeklySnapshot)
+            .filter(WeeklySnapshot.period_end <= before)
+            .order_by(WeeklySnapshot.period_end.desc())
+            .limit(limit)
+            .all()
+        )
+
+        result = []
+        for snap in reversed(snapshots):  # от старых к новым
+            try:
+                case_index = json.loads(snap.compact_case_index or "[]")
+                conclusions = json.loads(snap.overall_conclusions or "[]")
+            except Exception:
+                case_index, conclusions = [], []
+            result.append({
+                "period_label": (
+                    f"{snap.period_start.strftime('%d.%m')}–"
+                    f"{snap.period_end.strftime('%d.%m')}"
+                ),
+                "compact_case_index": case_index,
+                "overall_conclusions": conclusions,
+            })
+        return result
+
+
 def _group_by_topic(cases: list[dict]) -> dict[str, list[dict]]:
     seen: set[str] = set()
     groups: dict[str, list] = {}
@@ -143,6 +235,15 @@ def _build_docx(period_start, period_end, analysis: dict, topics: dict) -> Docum
                     run.font.size = Pt(10)
     else:
         doc.add_paragraph("Недостаточно данных для обзора.")
+
+    # ── Динамика за месяц (если есть данные для сравнения) ─────────
+    dynamics_points = analysis.get("dynamics_points", [])
+    if dynamics_points:
+        _add_heading(doc, "Динамика за месяц", 2)
+        for point in dynamics_points:
+            p = doc.add_paragraph(point)
+            for run in p.runs:
+                run.font.size = Pt(10)
 
     # ── Новости по темам ───────────────────────────────────────────
     _add_topics_section(doc, topics, analysis.get("topic_conclusions", {}))

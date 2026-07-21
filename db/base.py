@@ -27,6 +27,13 @@ engine = create_engine(
 SessionLocal = sessionmaker(engine, autocommit=False, autoflush=False)
 
 
+def init_engine(url: str) -> None:
+    """Re-initialise the module-level engine and session factory (used in tests)."""
+    global engine, SessionLocal
+    engine = create_engine(url, connect_args={"check_same_thread": False}, echo=False)
+    SessionLocal = sessionmaker(engine, autocommit=False, autoflush=False)
+
+
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
     session: Session = SessionLocal()

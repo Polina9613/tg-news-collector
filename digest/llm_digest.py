@@ -101,3 +101,83 @@ def generate_digest_analysis(
     except Exception as e:
         logger.warning(f"generate_digest_analysis parse error: {e}")
         return {"main_summary": "", "topic_conclusions": {}, "overall_conclusions": []}
+
+
+_DYNAMICS_SYSTEM = """Ты — аналитик, который следит за финтех-новостями каждую неделю
+и объясняет коллеге, что изменилось за последний месяц. Пиши просто, как будто
+рассказываешь за чашкой кофе — короткими предложениями, без канцелярита и сложных слов.
+
+ЗАПРЕЩЕНО:
+— Канцелярские обороты: "представлена кейсом", "получила подтверждение",
+  "продемонстрировала рост", "было зафиксировано"
+— Наукообразные метафоры: "прошла путь от", "перешла в стадию", "экосистемный сдвиг"
+— Общие фразы без цифр: "заметен рост интереса", "тема набирает популярность"
+
+МОЖНО И НУЖНО:
+— Конкретные цифры: "было 3, стало 5", "неделю назад один кейс, сейчас четыре"
+— Простые связки: "и вот", "а сейчас", "к ним подключился"
+— Называть компании по именам, а не обобщённо
+
+ЗАДАЧА: сравни компании и темы текущей недели с прошлыми неделями.
+Ищи ТОЛЬКО реальные пересечения — одна и та же компания или тема встречается
+несколько недель подряд. Если пересечений нет — не выдумывай, лучше меньше пунктов.
+Если что-то было активно раньше, а на этой неделе пропало — тоже можно упомянуть,
+одной короткой фразой.
+
+Выбери 2-4 самых заметных изменения. Каждое — 2-4 предложения.
+Отвечай строго JSON."""
+
+
+def generate_dynamics_section(
+    provider,
+    current_index: list[dict],
+    current_conclusions: list[str],
+    past_snapshots: list[dict],
+) -> list[str]:
+    """
+    Генерирует раздел "Динамика за месяц" — сравнение текущей недели с прошлыми.
+
+    past_snapshots — список словарей: period_label, compact_case_index, overall_conclusions.
+    Возвращает список пунктов (может быть пустым если пересечений нет).
+    """
+    if not past_snapshots:
+        return []
+
+    past_text_parts = []
+    for snap in past_snapshots:
+        cases_summary = "; ".join(
+            f"{c['company']} — {c['title']}" for c in snap["compact_case_index"][:20]
+        )
+        past_text_parts.append(
+            f"Неделя {snap['period_label']}:\n"
+            f"Кейсы: {cases_summary}\n"
+            f"Выводы: {'; '.join(snap['overall_conclusions'])}"
+        )
+    past_text = "\n\n".join(past_text_parts)
+
+    current_summary = "; ".join(
+        f"{c['company']} — {c['title']}" for c in current_index[:20]
+    )
+
+    user = f"""ПРОШЛЫЕ НЕДЕЛИ:
+{past_text}
+
+ТЕКУЩАЯ НЕДЕЛЯ:
+Кейсы: {current_summary}
+Выводы: {'; '.join(current_conclusions)}
+
+Сравни и найди реальные пересечения по компаниям/темам.
+
+Ответ строго JSON:
+{{"dynamics_points": ["пункт 1", "пункт 2"]}}"""
+
+    try:
+        from llm.call_logger import llm_call_context
+        with llm_call_context("generate_dynamics_section", context_note="digest_dynamics"):
+            raw = provider._call(_DYNAMICS_SYSTEM, user, max_tokens=800)
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        data = json.loads(match.group()) if match else {}
+        return data.get("dynamics_points", [])
+    except Exception as e:
+        logger.warning(f"generate_dynamics_section parse error: {e}")
+        return []

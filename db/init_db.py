@@ -2,7 +2,7 @@ from loguru import logger
 from sqlalchemy import func, select, text
 
 from db.base import Base, engine, get_session
-from db.models import AuditLog, BotUser, LLMCallLog, NewsCard, RawPost, Source, Trend, TrendCase  # noqa: F401 — registers all models with Base
+from db.models import AuditLog, BotUser, LLMCallLog, NewsCard, RawPost, Source, Trend, TrendCase, WeeklySnapshot  # noqa: F401 — registers all models with Base
 
 
 def migrate_add_url_fields() -> None:
@@ -144,6 +144,14 @@ def migrate_llm_call_logs() -> None:
     if "llm_call_logs" not in inspector.get_table_names():
         LLMCallLog.__table__.create(engine)
         logger.info("Migration: created llm_call_logs table")
+
+
+def migrate_weekly_snapshots() -> None:
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    if "weekly_snapshots" not in inspector.get_table_names():
+        WeeklySnapshot.__table__.create(engine)
+        logger.info("Migration: created weekly_snapshots table")
 
 
 def migrate_add_retry_after() -> None:
@@ -339,6 +347,7 @@ def init_db() -> None:
     migrate_trends_v2()
     migrate_add_retry_after()
     migrate_llm_call_logs()
+    migrate_weekly_snapshots()
 
 
 def get_db_stats() -> dict:

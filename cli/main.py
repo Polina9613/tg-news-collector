@@ -437,6 +437,142 @@ def digest(
 """)
 
 
+@app.command(name="backfill-snapshots")
+def backfill_snapshots_cmd(
+    weeks: int = typer.Option(2, "--weeks", "-w", help="За сколько недель назад восстановить снимки"),
+) -> None:
+    """Восстановить WeeklySnapshot за последние N недель с LLM-анализом.
+
+    Использует кейсы уже накопленные в БД. Пропускает недели для которых
+    снимок уже существует. Дальше снимки сохраняются автоматически при
+    каждой генерации /digest.
+    """
+    import json
+    from datetime import timedelta
+
+    _safe_setup_logging()
+    settings = get_settings()
+
+    from db.base import get_session
+    from db.models import NewsCard, Trend, TrendCase, WeeklySnapshot
+    from digest.generator import _group_by_topic
+    from digest.llm_digest import generate_digest_analysis
+    from llm.factory import create_llm_provider
+
+    try:
+        provider = create_llm_provider(settings)
+    except Exception as e:
+        typer.echo(f"✗ Ошибка инициализации LLM: {e}")
+        raise typer.Exit(code=1)
+
+    if not provider.is_available():
+        typer.echo(f"✗ {settings.llm_provider} недоступен — проверьте настройки.")
+        raise typer.Exit(code=1)
+
+    now = datetime.utcnow()
+    created = 0
+    skipped = 0
+
+    # От старых недель к новым — чтобы при генерации динамики для недели N-1
+    # уже был снимок недели N-2
+    week_ranges = []
+    for week_offset in range(weeks, 0, -1):
+        period_end = now - timedelta(days=7 * (week_offset - 1))
+        period_start = period_end - timedelta(days=7)
+        week_ranges.append((period_start, period_end))
+
+    typer.echo(f"Backfill снимков за {weeks} недели назад...\n")
+
+    for period_start, period_end in week_ranges:
+        with get_session() as s:
+            existing = (
+                s.query(WeeklySnapshot)
+                .filter(WeeklySnapshot.period_start >= period_start - timedelta(hours=12))
+                .filter(WeeklySnapshot.period_start <= period_start + timedelta(hours=12))
+                .first()
+            )
+            if existing:
+                skipped += 1
+                typer.echo(
+                    f"  Неделя {period_start.date()}–{period_end.date()}: снимок уже есть, пропуск"
+                )
+                continue
+
+            rows = (
+                s.query(TrendCase, NewsCard, Trend)
+                .outerjoin(NewsCard, TrendCase.news_card_id == NewsCard.id)
+                .outerjoin(Trend, TrendCase.trend_id == Trend.id)
+                .filter(
+                    ((NewsCard.published_at >= period_start) & (NewsCard.published_at < period_end))
+                    | ((TrendCase.created_at >= period_start) & (TrendCase.created_at < period_end))
+                )
+                .filter(TrendCase.is_duplicate == False)  # noqa: E712
+                .all()
+            )
+
+            if not rows:
+                typer.echo(
+                    f"  Неделя {period_start.date()}–{period_end.date()}: нет кейсов, пропуск"
+                )
+                continue
+
+            cases = []
+            for tc, nc, trend in rows:
+                topic_category = (trend.category if trend else None) or tc.industry or "Другое"
+                cases.append({
+                    "case_title": tc.case_title,
+                    "company": tc.company,
+                    "description": tc.description,
+                    "how_it_works": tc.how_it_works,
+                    "value": tc.value,
+                    "market": tc.market,
+                    "industry": tc.industry,
+                    "source_url": tc.source_url,
+                    "trend_name": trend.name if trend else None,
+                    "trend_category": topic_category,
+                    "relevance_score": nc.relevance_score if nc else 0,
+                })
+
+        topics = _group_by_topic(cases)
+        top_cases_for_context = sorted(
+            cases, key=lambda c: c.get("relevance_score", 0), reverse=True
+        )[:15]
+
+        typer.echo(
+            f"  Неделя {period_start.date()}–{period_end.date()}: "
+            f"{len(cases)} кейсов, запрашиваю LLM-анализ..."
+        )
+        analysis = generate_digest_analysis(provider, top_cases_for_context, topics)
+
+        compact_index = [
+            {
+                "company": c.get("company") or "—",
+                "topic": topic,
+                "title": (c.get("case_title") or "")[:100],
+            }
+            for topic, tcases in topics.items()
+            for c in tcases
+        ]
+
+        with get_session() as s:
+            s.add(WeeklySnapshot(
+                period_start=period_start,
+                period_end=period_end,
+                main_summary=analysis.get("main_summary", ""),
+                overall_conclusions=json.dumps(
+                    analysis.get("overall_conclusions", []), ensure_ascii=False
+                ),
+                compact_case_index=json.dumps(compact_index, ensure_ascii=False),
+            ))
+        created += 1
+        typer.echo(
+            f"    Сохранено: {len(compact_index)} кейсов, "
+            f"{len(analysis.get('overall_conclusions', []))} выводов"
+        )
+
+    typer.echo(f"\n Готово: создано {created} снимков, пропущено {skipped}")
+
+
 @app.command()
 def trends() -> None:
     """Показать все тренды в базе знаний с категориями."""
