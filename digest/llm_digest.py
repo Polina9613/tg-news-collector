@@ -1,117 +1,104 @@
-"""Единый аналитический вызов для всего дайджеста."""
+"""Аналитические LLM-вызовы для дайджеста."""
 import json
 import re
 
 from loguru import logger
 
 
-_DIGEST_ANALYSIS_SYSTEM = """Ты — аналитик финтех-дайджеста для банковских специалистов.
+_MAIN_SUMMARY_SYSTEM = """Ты — аналитик финтех-дайджеста для банковских специалистов.
 Пишешь по-русски в нейтральном аналитическом тоне: содержательно, с выводами и
 связками между фактами, но без эмоциональных оценок и драматизации.
 
 СТРОГИЕ ПРАВИЛА:
-— Используй ТОЛЬКО факты из предоставленных кейсов. Не придумывай связи,
-  тенденции или интерпретации, которые не следуют напрямую из текста кейсов.
-— Не используй фразы уровня "экосистемный сдвиг", "новая парадигма",
-  "трансформация отрасли" — это пустые обороты без содержания.
-— Не используй оценочные усилители: "агрессивно", "стремительно", "взрывной рост",
-  "прямой вызов", "не хочет упустить момент".
-— Разрешены содержательные оценки основанные на фактах: "это говорит о том, что…",
-  "это может означать…", "в отличие от X, здесь ставка на Y".
-— Пиши как аналитик объясняющий коллеге суть происходящего, а не как
-  пресс-релиз или новостная заметка.
+— Используй ТОЛЬКО факты из предоставленных кейсов.
+— Не используй пустые обороты: "экосистемный сдвиг", "новая парадигма".
+— Не используй усилители: "агрессивно", "взрывной рост", "прямой вызов".
+— Разрешены содержательные оценки: "это говорит о том, что…".
 
-ЗАДАЧИ (три в одном ответе):
-
-1. ГЛАВНОЕ ЗА НЕДЕЛЮ — 1-2 абзаца связного текста (не список!) о 2-4
-   самых значимых событиях недели. Показывай связи между кейсами если они
-   реально есть (например несколько банков делают похожее), но не выдумывай
-   связи которых нет в фактах.
-
-2. ВЫВОД ПО КАЖДОЙ ТЕМЕ — одна короткая фраза (до 15 слов) отражающая
-   суть того что происходит в теме на этой неделе. Не пересказ кейсов,
-   а обобщение в одно предложение.
-
-3. ВЕКТОРЫ ИЗМЕНЕНИЙ — 2-4 пункта, каждый 1-2 предложения. Это сквозные
-   наблюдения которые пересекают несколько тем/кейсов — например если
-   несколько разных компаний одновременно делают похожие шаги, или если
-   видна общая закономерность (несколько кейсов о том что автоматизация
-   без контроля человека даёт сбои). Если такого явного паттерна в данных
-   недели нет — не выдумывай, дай меньше пунктов (1-2 честных наблюдения
-   лучше чем 4 притянутых).
+ЗАДАЧА: напиши 1-2 абзаца (main_summary) о 2-4 самых значимых событиях недели
+на основе предоставленных кейсов. Показывай связи между кейсами если они
+реально есть, но не выдумывай.
 
 Отвечай строго JSON."""
 
 
-def generate_digest_analysis(
-    provider,
-    top_cases: list[dict],
-    topics: dict[str, list[dict]],
-) -> dict:
-    """Единый вызов: главное за неделю + выводы по темам + векторы изменений."""
-    MAX_TOPICS_IN_PROMPT = 12
-    MAX_CASES_PER_TOPIC = 5
-
+def generate_main_summary(provider, top_cases: list[dict]) -> str:
+    """Генерирует только 'Главное за неделю' — лёгкий вызов, малый контекст."""
     top_summary = "\n\n".join(
         f"[{c.get('trend_category', c.get('industry', 'Разное'))}] "
         f"{c.get('company', '—')}: {c.get('case_title', '')}\n"
         f"{c.get('description', '')[:150]}\n"
         f"Ценность: {c.get('value', '')[:100]}"
-        for c in top_cases[:12]
+        for c in top_cases[:10]
     )
-
-    # Самые крупные темы приоритетнее — берём не более MAX_TOPICS_IN_PROMPT
-    sorted_topics = sorted(topics.items(), key=lambda x: -len(x[1]))
-    limited_topics = sorted_topics[:MAX_TOPICS_IN_PROMPT]
-
-    topics_summary = []
-    for topic, cases in limited_topics:
-        cases_short = "\n".join(
-            f"- {c.get('company', '—')}: {c.get('case_title', '')}"
-            for c in cases[:MAX_CASES_PER_TOPIC]
-        )
-        topics_summary.append(f"ТЕМА: {topic}\n{cases_short}")
-    topics_text = "\n\n".join(topics_summary)
 
     user = f"""НАИБОЛЕЕ ЗНАЧИМЫЕ КЕЙСЫ НЕДЕЛИ:
 {top_summary}
 
-ВСЕ ТЕМЫ И КЕЙСЫ НЕДЕЛИ:
+Ответ строго JSON:
+{{"main_summary": "1-2 абзаца текста, разделённых \\n\\n"}}"""
+
+    try:
+        from llm.call_logger import llm_call_context
+        with llm_call_context("generate_main_summary", context_note="digest"):
+            raw = provider._call(_MAIN_SUMMARY_SYSTEM, user, max_tokens=700, timeout=90)
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        data = json.loads(match.group()) if match else {}
+        return data.get("main_summary", "")
+    except Exception as e:
+        logger.warning(f"generate_main_summary parse error: {e}")
+        return ""
+
+
+_TOPIC_ANALYSIS_SYSTEM = """Ты — аналитик финтех-дайджеста.
+Пишешь по-русски просто и по делу, без канцелярита и пустых оборотов.
+
+ЗАДАЧИ:
+1. Для каждой темы — короткий вывод (до 15 слов) что происходит в теме на этой неделе.
+2. 2-4 вектора изменений — сквозные наблюдения пересекающие несколько тем/кейсов.
+   Если явного паттерна нет — дай меньше пунктов, не выдумывай.
+
+Отвечай строго JSON."""
+
+
+def generate_topic_analysis(
+    provider,
+    topics: dict[str, list[dict]],
+) -> dict:
+    """Генерирует topic_conclusions + overall_conclusions — отдельно от main_summary."""
+    topics_summary = []
+    for topic, cases in topics.items():
+        cases_short = "\n".join(
+            f"- {c.get('company', '—')}: {c.get('case_title', '')}"
+            for c in cases[:5]
+        )
+        topics_summary.append(f"ТЕМА: {topic}\n{cases_short}")
+    topics_text = "\n\n".join(topics_summary)
+
+    user = f"""ТЕМЫ И КЕЙСЫ НЕДЕЛИ:
 {topics_text}
 
 Ответ строго JSON:
 {{
-  "main_summary": "1-2 абзаца текста, разделённых \\n\\n",
-  "topic_conclusions": {{
-    "название темы 1": "короткий вывод до 15 слов",
-    "название темы 2": "короткий вывод до 15 слов"
-  }},
-  "overall_conclusions": [
-    "вектор изменений 1",
-    "вектор изменений 2"
-  ]
+  "topic_conclusions": {{"название темы": "короткий вывод до 15 слов"}},
+  "overall_conclusions": ["вектор изменений 1", "вектор изменений 2"]
 }}
 
 Ключи в topic_conclusions должны ТОЧНО совпадать с названиями тем выше."""
 
     try:
         from llm.call_logger import llm_call_context
-        with llm_call_context("generate_digest_analysis", context_note="digest"):
-            raw = provider._call(
-                _DIGEST_ANALYSIS_SYSTEM, user,
-                max_tokens=1800,
-                timeout=180,
-            )
+        with llm_call_context("generate_topic_analysis", context_note="digest"):
+            raw = provider._call(_TOPIC_ANALYSIS_SYSTEM, user, max_tokens=1200, timeout=120)
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         data = json.loads(match.group()) if match else {}
         return {
-            "main_summary": data.get("main_summary", ""),
             "topic_conclusions": data.get("topic_conclusions", {}),
             "overall_conclusions": data.get("overall_conclusions", []),
         }
     except Exception as e:
-        logger.warning(f"generate_digest_analysis parse error: {e}")
-        return {"main_summary": "", "topic_conclusions": {}, "overall_conclusions": []}
+        logger.warning(f"generate_topic_analysis parse error: {e}")
+        return {"topic_conclusions": {}, "overall_conclusions": []}
 
 
 _DYNAMICS_SYSTEM = """Ты — аналитик, который следит за финтех-новостями каждую неделю

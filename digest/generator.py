@@ -8,11 +8,9 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 from loguru import logger
-from sqlalchemy import or_
-
 from db.base import get_session
 from db.models import NewsCard, Trend, TrendCase
-from digest.llm_digest import generate_digest_analysis
+from digest.llm_digest import generate_main_summary, generate_topic_analysis
 
 COLOR_GREEN = RGBColor(0x1D, 0x9E, 0x75)
 COLOR_DARK = RGBColor(0x2C, 0x2C, 0x2A)
@@ -33,7 +31,7 @@ def generate_digest(
     provider,
     days: int = 7,
     output_path: str | None = None,
-    max_cases: int = 50,
+    max_cases: int = 30,
 ) -> DigestResult:
     period_end = datetime.utcnow()
     period_start = period_end - timedelta(days=days)
@@ -43,18 +41,41 @@ def generate_digest(
         ts = period_end.strftime("%Y%m%d")
         output_path = f"data/digests/digest_{ts}.docx"
 
-    cases = _load_cases(period_start, max_cases)
-    logger.info(f"Digest: {len(cases)} cases, period {period_start.date()}–{period_end.date()}")
+    cases = _load_cases(period_start, period_end, max_cases)
+    logger.info(f"Digest: {len(cases)} cases (limit={max_cases}), period {period_start.date()}–{period_end.date()}")
 
     topics = _group_by_topic(cases)
 
+    MAX_TOPICS_IN_DIGEST = 8
+    if len(topics) > MAX_TOPICS_IN_DIGEST:
+        sorted_topics = sorted(topics.items(), key=lambda x: -len(x[1]))
+        kept_topics = dict(sorted_topics[:MAX_TOPICS_IN_DIGEST])
+        overflow_cases = []
+        for _, tcases in sorted_topics[MAX_TOPICS_IN_DIGEST:]:
+            overflow_cases.extend(tcases)
+        if overflow_cases:
+            kept_topics.setdefault("Другое", []).extend(overflow_cases)
+        topics = kept_topics
+        logger.info(f"Digest: topics reduced to {len(topics)} (top {MAX_TOPICS_IN_DIGEST} + Другое)")
+
     top_cases_for_context = sorted(
         cases, key=lambda c: c.get("relevance_score", 0), reverse=True
-    )[:15]
+    )[:10]
 
-    logger.info("LLM: единый аналитический вызов (главное + выводы по темам + векторы)...")
-    analysis = generate_digest_analysis(provider, top_cases_for_context, topics) if cases else {
-        "main_summary": "", "topic_conclusions": {}, "overall_conclusions": []
+    if cases:
+        logger.info("LLM: главное за неделю...")
+        main_summary = generate_main_summary(provider, top_cases_for_context)
+
+        logger.info("LLM: выводы по темам и векторы изменений...")
+        topic_analysis = generate_topic_analysis(provider, topics)
+    else:
+        main_summary = ""
+        topic_analysis = {"topic_conclusions": {}, "overall_conclusions": []}
+
+    analysis = {
+        "main_summary": main_summary,
+        "topic_conclusions": topic_analysis["topic_conclusions"],
+        "overall_conclusions": topic_analysis["overall_conclusions"],
     }
 
     # Динамика — сравнение с прошлыми неделями (если они есть)
@@ -94,33 +115,39 @@ def generate_digest(
     )
 
 
-def _load_cases(since: datetime, limit: int) -> list[dict]:
+def _load_cases(since: datetime, until: datetime, limit: int) -> list[dict]:
+    """
+    Загружает кейсы строго в диапазоне [since, until).
+    Дата определяется в Python: nc.published_at если есть NewsCard, иначе tc.created_at.
+    Это надёжнее SQL-фильтра через OR с NULL-полями.
+    """
     with get_session() as session:
         rows = (
             session.query(TrendCase, NewsCard, Trend)
             .outerjoin(NewsCard, TrendCase.news_card_id == NewsCard.id)
             .outerjoin(Trend, TrendCase.trend_id == Trend.id)
-            .filter(
-                or_(
-                    NewsCard.published_at >= since,
-                    TrendCase.created_at >= since,
-                )
-            )
-            .filter(
-                or_(
-                    NewsCard.relevance_score >= 85,
-                    NewsCard.id == None,  # noqa: E711  — ручные кейсы
-                )
-            )
             .filter(TrendCase.is_duplicate == False)  # noqa: E712
-            .order_by(NewsCard.relevance_score.desc().nullslast())
-            .limit(limit)
             .all()
         )
+
+        filtered = []
+        for tc, nc, tr in rows:
+            effective_date = nc.published_at if nc else tc.created_at
+            if effective_date is None:
+                continue
+            if not (since <= effective_date < until):
+                continue
+            # Сохраняем только достаточно релевантные карточки (или ручные кейсы без NewsCard)
+            if nc is not None and (nc.relevance_score or 0) < 85:
+                continue
+            filtered.append((tc, nc, tr, effective_date))
+
+        filtered.sort(key=lambda x: (x[1].relevance_score if x[1] else 0), reverse=True)
+
         return [
             {
                 "trend_name": tc.trend_name or (tr.name if tr else ""),
-                "trend_category": tr.category if tr else "",
+                "trend_category": (tr.category if tr else None) or tc.industry or "",
                 "case_title": tc.case_title,
                 "company": tc.company,
                 "description": tc.description,
@@ -131,8 +158,9 @@ def _load_cases(since: datetime, limit: int) -> list[dict]:
                 "market": tc.market,
                 "industry": tc.industry,
                 "relevance_score": nc.relevance_score if nc else 0,
+                "published_at": effective_date,
             }
-            for tc, nc, tr in rows
+            for tc, nc, tr, effective_date in filtered[:limit]
         ]
 
 
