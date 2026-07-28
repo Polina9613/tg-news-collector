@@ -152,7 +152,14 @@ class YandexProvider:
             logger.warning(f"Yandex AI availability check failed: {e}")
             return False
 
-    def _call(self, system: str, user: str, retry: int = 0, max_tokens: int = 1500) -> str:
+    def _call(
+        self,
+        system: str,
+        user: str,
+        retry: int = 0,
+        max_tokens: int = 1500,
+        timeout: int | None = None,
+    ) -> str:
         """
         Отправляет запрос к Yandex AI Studio через OpenAI-совместимый эндпоинт.
         Авторизация: Api-Key (не Bearer).
@@ -160,6 +167,7 @@ class YandexProvider:
         from time import perf_counter
         from llm.call_logger import log_llm_call
 
+        effective_timeout = timeout or self.timeout
         prompt_chars = len(system) + len(user)
         start = perf_counter()
         response_content = ""
@@ -183,7 +191,7 @@ class YandexProvider:
                     "temperature": 0.1,
                     "max_tokens": max_tokens,
                 },
-                timeout=self.timeout,
+                timeout=effective_timeout,
             )
             response.raise_for_status()
             data = response.json()
@@ -203,7 +211,7 @@ class YandexProvider:
                 wait = 60 * (retry + 1)
                 logger.warning(f"Yandex rate limit, waiting {wait}s (retry {retry + 1}/3)")
                 time.sleep(wait)
-                return self._call(system, user, retry=retry + 1, max_tokens=max_tokens)
+                return self._call(system, user, retry=retry + 1, max_tokens=max_tokens, timeout=timeout)
             if status == 401:
                 logger.error("Yandex API auth error: check YANDEX_API_KEY and YANDEX_FOLDER_ID")
             else:
@@ -218,7 +226,7 @@ class YandexProvider:
                 error_message = f"timeout (retry {retry + 1}/2)"
                 logger.warning(f"Yandex timeout, retry {retry + 1}/2")
                 time.sleep(5)
-                return self._call(system, user, retry=retry + 1, max_tokens=max_tokens)
+                return self._call(system, user, retry=retry + 1, max_tokens=max_tokens, timeout=timeout)
             success = False
             error_message = "ReadTimeout"
             raise

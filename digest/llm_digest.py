@@ -49,19 +49,26 @@ def generate_digest_analysis(
     topics: dict[str, list[dict]],
 ) -> dict:
     """Единый вызов: главное за неделю + выводы по темам + векторы изменений."""
+    MAX_TOPICS_IN_PROMPT = 12
+    MAX_CASES_PER_TOPIC = 5
+
     top_summary = "\n\n".join(
         f"[{c.get('trend_category', c.get('industry', 'Разное'))}] "
         f"{c.get('company', '—')}: {c.get('case_title', '')}\n"
-        f"{c.get('description', '')[:200]}\n"
-        f"Ценность: {c.get('value', '')[:150]}"
-        for c in top_cases[:15]
+        f"{c.get('description', '')[:150]}\n"
+        f"Ценность: {c.get('value', '')[:100]}"
+        for c in top_cases[:12]
     )
 
+    # Самые крупные темы приоритетнее — берём не более MAX_TOPICS_IN_PROMPT
+    sorted_topics = sorted(topics.items(), key=lambda x: -len(x[1]))
+    limited_topics = sorted_topics[:MAX_TOPICS_IN_PROMPT]
+
     topics_summary = []
-    for topic, cases in topics.items():
+    for topic, cases in limited_topics:
         cases_short = "\n".join(
             f"- {c.get('company', '—')}: {c.get('case_title', '')}"
-            for c in cases[:6]
+            for c in cases[:MAX_CASES_PER_TOPIC]
         )
         topics_summary.append(f"ТЕМА: {topic}\n{cases_short}")
     topics_text = "\n\n".join(topics_summary)
@@ -90,7 +97,11 @@ def generate_digest_analysis(
     try:
         from llm.call_logger import llm_call_context
         with llm_call_context("generate_digest_analysis", context_note="digest"):
-            raw = provider._call(_DIGEST_ANALYSIS_SYSTEM, user, max_tokens=1500)
+            raw = provider._call(
+                _DIGEST_ANALYSIS_SYSTEM, user,
+                max_tokens=1800,
+                timeout=180,
+            )
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         data = json.loads(match.group()) if match else {}
         return {
@@ -174,7 +185,7 @@ def generate_dynamics_section(
     try:
         from llm.call_logger import llm_call_context
         with llm_call_context("generate_dynamics_section", context_note="digest_dynamics"):
-            raw = provider._call(_DYNAMICS_SYSTEM, user, max_tokens=800)
+            raw = provider._call(_DYNAMICS_SYSTEM, user, max_tokens=800, timeout=120)
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         data = json.loads(match.group()) if match else {}
         return data.get("dynamics_points", [])
