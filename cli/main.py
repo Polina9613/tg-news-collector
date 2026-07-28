@@ -576,13 +576,17 @@ def backfill_snapshots_cmd(
 @app.command(name="clean-source-duplicates")
 def clean_source_duplicates_cmd(
     days: int = typer.Option(30, "--days", "-d", help="За сколько дней назад проверить"),
-    min_cases_per_url: int = typer.Option(3, "--min", help="От скольки кейсов на один URL считать подозрительным"),
+    min_cases_per_url: int = typer.Option(3, "--min", help="Мин. кейсов на URL для проверки"),
+    max_generic_ratio: float = typer.Option(
+        0.7, "--max-generic-ratio",
+        help="Мин. доля кейсов БЕЗ конкретной компании чтобы считать URL подозрительным",
+    ),
     dry_run: bool = typer.Option(True, "--dry-run/--apply", help="Только показать, не применять"),
 ) -> None:
-    """Найти source_url с несколькими кейсами и пометить лишние как дубли.
+    """Найти source_url где большинство кейсов без компании — признак раздробленного обзора.
 
-    По умолчанию dry-run — только показывает что было бы сделано.
-    Используй --apply чтобы реально применить изменения.
+    НЕ трогает агрегаторы/сводки где кейсы имеют разные реальные компании.
+    По умолчанию dry-run. Используй --apply чтобы применить изменения.
     """
     from collections import defaultdict
     from datetime import timedelta
@@ -592,12 +596,12 @@ def clean_source_duplicates_cmd(
     from db.base import get_session
     from db.models import TrendCase
 
+    GENERIC_MARKERS = {"мир", "world", "разное", "другое", "—", "null", "none", ""}
+
+    def _is_generic(company: str | None) -> bool:
+        return (company or "").strip().lower() in GENERIC_MARKERS
+
     since = datetime.utcnow() - timedelta(days=days)
-
-    GENERIC_COMPANY_MARKERS = {"мир", "world", "разное", "другое", "", None}
-
-    def _is_generic(c: TrendCase) -> bool:
-        return (c.company or "").strip().lower() in GENERIC_COMPANY_MARKERS
 
     with get_session() as s:
         cases = (
@@ -612,32 +616,40 @@ def clean_source_duplicates_cmd(
         for c in cases:
             by_url[c.source_url].append(c)
 
-        suspicious_groups = {
-            url: group for url, group in by_url.items()
-            if len(group) >= min_cases_per_url
-        }
+        suspicious_groups = {}
+        for url, group in by_url.items():
+            if len(group) < min_cases_per_url:
+                continue
+            generic_count = sum(1 for c in group if _is_generic(c.company))
+            if generic_count / len(group) >= max_generic_ratio:
+                suspicious_groups[url] = group
 
         if not suspicious_groups:
-            typer.echo(f"Не найдено URL с {min_cases_per_url}+ кейсами за последние {days} дней.")
+            typer.echo(
+                f"Не найдено URL с признаками раздробленного обзора за последние {days} дней."
+            )
             return
 
-        typer.echo(f"Найдено {len(suspicious_groups)} подозрительных URL:\n")
+        typer.echo(f"Найдено {len(suspicious_groups)} URL с признаками дробления обзорного поста:\n")
 
         total_marked = 0
         for url, group in suspicious_groups.items():
-            specific = [c for c in group if not _is_generic(c)]
+            specific = [c for c in group if not _is_generic(c.company)]
             keep = specific[0] if specific else sorted(group, key=lambda c: c.created_at)[0]
             to_mark = [c for c in group if c.id != keep.id]
 
+            generic_count = sum(1 for c in group if _is_generic(c.company))
             typer.echo(f"URL: {url}")
             typer.echo(
-                f"  Кейсов: {len(group)}, оставляем: "
-                f"#{keep.id} ({keep.company or '—'}: {(keep.case_title or '')[:50]})"
+                f"  Кейсов: {len(group)}, без компании: {generic_count} "
+                f"({int(generic_count / len(group) * 100)}%)"
+            )
+            typer.echo(
+                f"  Оставляем: #{keep.id} ({keep.company or '—'}: {(keep.case_title or '')[:50]})"
             )
             for c in to_mark:
                 typer.echo(
-                    f"  → помечаем дублем: "
-                    f"#{c.id} ({c.company or '—'}: {(c.case_title or '')[:50]})"
+                    f"  → дубль: #{c.id} ({c.company or '—'}: {(c.case_title or '')[:50]})"
                 )
                 if not dry_run:
                     c.is_duplicate = True
