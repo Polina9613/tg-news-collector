@@ -573,6 +573,85 @@ def backfill_snapshots_cmd(
     typer.echo(f"\n Готово: создано {created} снимков, пропущено {skipped}")
 
 
+@app.command(name="clean-source-duplicates")
+def clean_source_duplicates_cmd(
+    days: int = typer.Option(30, "--days", "-d", help="За сколько дней назад проверить"),
+    min_cases_per_url: int = typer.Option(3, "--min", help="От скольки кейсов на один URL считать подозрительным"),
+    dry_run: bool = typer.Option(True, "--dry-run/--apply", help="Только показать, не применять"),
+) -> None:
+    """Найти source_url с несколькими кейсами и пометить лишние как дубли.
+
+    По умолчанию dry-run — только показывает что было бы сделано.
+    Используй --apply чтобы реально применить изменения.
+    """
+    from collections import defaultdict
+    from datetime import timedelta
+
+    _safe_setup_logging()
+
+    from db.base import get_session
+    from db.models import TrendCase
+
+    since = datetime.utcnow() - timedelta(days=days)
+
+    GENERIC_COMPANY_MARKERS = {"мир", "world", "разное", "другое", "", None}
+
+    def _is_generic(c: TrendCase) -> bool:
+        return (c.company or "").strip().lower() in GENERIC_COMPANY_MARKERS
+
+    with get_session() as s:
+        cases = (
+            s.query(TrendCase)
+            .filter(TrendCase.created_at >= since)
+            .filter(TrendCase.is_duplicate == False)  # noqa: E712
+            .filter(TrendCase.source_url.isnot(None))
+            .all()
+        )
+
+        by_url: dict[str, list[TrendCase]] = defaultdict(list)
+        for c in cases:
+            by_url[c.source_url].append(c)
+
+        suspicious_groups = {
+            url: group for url, group in by_url.items()
+            if len(group) >= min_cases_per_url
+        }
+
+        if not suspicious_groups:
+            typer.echo(f"Не найдено URL с {min_cases_per_url}+ кейсами за последние {days} дней.")
+            return
+
+        typer.echo(f"Найдено {len(suspicious_groups)} подозрительных URL:\n")
+
+        total_marked = 0
+        for url, group in suspicious_groups.items():
+            specific = [c for c in group if not _is_generic(c)]
+            keep = specific[0] if specific else sorted(group, key=lambda c: c.created_at)[0]
+            to_mark = [c for c in group if c.id != keep.id]
+
+            typer.echo(f"URL: {url}")
+            typer.echo(
+                f"  Кейсов: {len(group)}, оставляем: "
+                f"#{keep.id} ({keep.company or '—'}: {(keep.case_title or '')[:50]})"
+            )
+            for c in to_mark:
+                typer.echo(
+                    f"  → помечаем дублем: "
+                    f"#{c.id} ({c.company or '—'}: {(c.case_title or '')[:50]})"
+                )
+                if not dry_run:
+                    c.is_duplicate = True
+                    c.duplicate_of_case_id = keep.id
+            total_marked += len(to_mark)
+            typer.echo()
+
+        if dry_run:
+            typer.echo(f"[DRY RUN] Было бы помечено дублями: {total_marked} кейсов.")
+            typer.echo("Запусти с флагом --apply чтобы применить изменения.")
+        else:
+            typer.echo(f"✓ Помечено дублями: {total_marked} кейсов.")
+
+
 @app.command()
 def trends() -> None:
     """Показать все тренды в базе знаний с категориями."""

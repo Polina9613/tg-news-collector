@@ -45,6 +45,7 @@ class EnrichResult:
     relevant: int = 0
     irrelevant: int = 0
     news_only: int = 0
+    digest_only: int = 0
     cases_created: int = 0
     pending_trends: int = 0
     duplicates_marked: int = 0
@@ -295,6 +296,14 @@ def enrich_news_cards(
                 if not card.summary:
                     card.summary = (card.clean_text or "")[:280].rsplit(" ", 1)[0] + "…"
 
+                # ── Ступень 2: обзор/подборка — не создаём кейсов ───────
+                if post_type == "digest":
+                    result.digest_only += 1
+                    card.llm_enriched = True
+                    card.llm_enriched_at = datetime.utcnow()
+                    logger.debug(f"card_id={card.id} classified as digest/overview — skipping extract_cases")
+                    continue
+
                 # ── Ступень 2: новость — готово ───────────────────────────
                 if post_type == "news":
                     result.news_only += 1
@@ -400,8 +409,8 @@ def enrich_news_cards(
     llm_calls_saved = result.pre_filtered + result.early_duplicates
     logger.info(
         f"Enrich done: relevant={result.relevant} irrelevant={result.irrelevant} "
-        f"news_only={result.news_only} cases={result.cases_created} "
-        f"pre_filtered={result.pre_filtered} early_dup={result.early_duplicates} "
-        f"(saved ~{llm_calls_saved} LLM calls) errors={result.errors}"
+        f"news_only={result.news_only} digest_only={result.digest_only} "
+        f"cases={result.cases_created} pre_filtered={result.pre_filtered} "
+        f"early_dup={result.early_duplicates} errors={result.errors}"
     )
     return result
