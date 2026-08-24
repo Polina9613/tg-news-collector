@@ -176,6 +176,7 @@ class YandexProvider:
         retry: int = 0,
         max_tokens: int = 1500,
         timeout: int | None = None,
+        reasoning_effort: str | None = None,  # ignored — not a reasoning model
     ) -> str:
         """
         Отправляет запрос к Yandex AI Studio через OpenAI-совместимый эндпоинт.

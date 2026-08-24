@@ -144,6 +144,7 @@ class GroqProvider:
         retry: int = 0,
         max_tokens: int = 1500,
         timeout: int | None = None,
+        reasoning_effort: str | None = None,  # ignored — not a reasoning model
     ) -> str:
         from time import perf_counter
         from llm.call_logger import log_llm_call

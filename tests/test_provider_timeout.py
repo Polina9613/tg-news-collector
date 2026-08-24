@@ -6,7 +6,7 @@ def _make_mock_response(content: str = "ok") -> MagicMock:
     r = MagicMock()
     r.status_code = 200
     r.json.return_value = {
-        "choices": [{"message": {"content": content}}],
+        "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
         "usage": {},
     }
     r.raise_for_status = MagicMock()
@@ -65,3 +65,37 @@ def test_yandex_uses_default_timeout_when_not_specified():
     with patch("httpx.post", return_value=_make_mock_response()) as mock_post:
         provider._call("sys", "user")
     assert mock_post.call_args.kwargs.get("timeout") == 45
+
+
+# ── reasoning_effort tests ────────────────────────────────────────────────────
+
+def test_deepseek_passes_reasoning_effort():
+    """reasoning_effort="low" попадает в тело запроса."""
+    from llm.deepseek_provider import DeepSeekProvider
+
+    provider = DeepSeekProvider(api_key="test", model="deepseek-v4-flash", timeout=60)
+    with patch("httpx.post", return_value=_make_mock_response()) as mock_post:
+        provider._call("system", "user", reasoning_effort="low")
+    body = mock_post.call_args.kwargs.get("json", {})
+    assert body.get("reasoning_effort") == "low"
+
+
+def test_deepseek_omits_reasoning_effort_when_not_specified():
+    """Без reasoning_effort ключ не включается в payload."""
+    from llm.deepseek_provider import DeepSeekProvider
+
+    provider = DeepSeekProvider(api_key="test", model="deepseek-v4-flash", timeout=60)
+    with patch("httpx.post", return_value=_make_mock_response()) as mock_post:
+        provider._call("system", "user")
+    body = mock_post.call_args.kwargs.get("json", {})
+    assert "reasoning_effort" not in body
+
+
+def test_groq_ignores_reasoning_effort_param():
+    """Groq-провайдер принимает reasoning_effort и не падает."""
+    from llm.groq_provider import GroqProvider
+
+    provider = GroqProvider(api_key="test", model="llama-3.3-70b-versatile", timeout=60)
+    with patch("httpx.post", return_value=_make_mock_response()):
+        result = provider._call("system", "user", reasoning_effort="low")
+    assert result == "ok"

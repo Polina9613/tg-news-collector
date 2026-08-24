@@ -156,6 +156,7 @@ class DeepSeekProvider:
         retry: int = 0,
         max_tokens: int = 1500,
         timeout: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> str:
         from time import perf_counter
         from llm.call_logger import log_llm_call
@@ -169,21 +170,25 @@ class DeepSeekProvider:
         error_message = None
 
         try:
+            payload: dict = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "temperature": 0.1,
+                "max_tokens": max_tokens,
+            }
+            if reasoning_effort is not None:
+                payload["reasoning_effort"] = reasoning_effort
+
             response = httpx.post(
                 DEEPSEEK_API_URL,
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": max_tokens,
-                },
+                json=payload,
                 timeout=effective_timeout,
             )
             response.raise_for_status()
@@ -232,7 +237,7 @@ class DeepSeekProvider:
                 wait = 30 * (retry + 1)
                 logger.warning(f"DeepSeek rate limit, waiting {wait}s (retry {retry + 1}/2)")
                 time.sleep(wait)
-                return self._call(system, user, retry=retry + 1, max_tokens=max_tokens, timeout=timeout)
+                return self._call(system, user, retry=retry + 1, max_tokens=max_tokens, timeout=timeout, reasoning_effort=reasoning_effort)
             if e.response.status_code == 401:
                 logger.error("DeepSeek auth error: check DEEPSEEK_API_KEY")
             success = False
@@ -245,7 +250,7 @@ class DeepSeekProvider:
                 error_message = f"timeout (retry {retry + 1}/2)"
                 logger.warning(f"DeepSeek timeout, retry {retry + 1}/2")
                 time.sleep(5)
-                return self._call(system, user, retry=retry + 1, max_tokens=max_tokens, timeout=timeout)
+                return self._call(system, user, retry=retry + 1, max_tokens=max_tokens, timeout=timeout, reasoning_effort=reasoning_effort)
             success = False
             error_message = "ReadTimeout"
             raise
@@ -404,7 +409,7 @@ class DeepSeekProvider:
             f'Ответ JSON: {{"relevant": true/false, "relevance_reason": "кратко", '
             f'"type": "case"/"news"/"digest"/null, "case_count": 0}}'
         )
-        raw = self._call(_RELEVANCE_SYSTEM, user, max_tokens=600)
+        raw = self._call(_RELEVANCE_SYSTEM, user, max_tokens=600, reasoning_effort="low")
         try:
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             data = json.loads(match.group()) if match else {}
@@ -468,7 +473,7 @@ class DeepSeekProvider:
             f'"how_it_works": "..." или null, "value": "...", '
             f'"market": "Россия"/"Мир"/"Россия и мир", "industry": "..."}}]'
         )
-        raw = self._call(_EXTRACT_CASES_SYSTEM, user, max_tokens=1800)
+        raw = self._call(_EXTRACT_CASES_SYSTEM, user, max_tokens=1800, reasoning_effort="low")
         try:
             match = re.search(r'\[.*\]', raw, re.DOTALL)
             cases = json.loads(match.group()) if match else []
@@ -513,7 +518,7 @@ class DeepSeekProvider:
             f'"new_trend_description": null, "reasoning": "кратко"}}'
         )
 
-        raw = self._call(system, user, max_tokens=700)
+        raw = self._call(system, user, max_tokens=700, reasoning_effort="low")
         try:
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             data = json.loads(match.group()) if match else {}
