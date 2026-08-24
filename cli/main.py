@@ -260,6 +260,7 @@ def enrich(
     limit: int = typer.Option(30, help="Макс. карточек за запуск"),
     min_score: int = typer.Option(20, help="Мин. score для обогащения"),
     reprocess: bool = typer.Option(False, "--reprocess", help="Повторно обработать"),
+    since_days: int | None = typer.Option(None, "--since-days", help="Только карточки за последние N дней"),
 ) -> None:
     """Структурировать карточки через LLM → trend_cases."""
     _safe_setup_logging()
@@ -278,7 +279,7 @@ def enrich(
         raise typer.Exit(code=1)
 
     typer.echo(f"Провайдер: {settings.llm_provider} | Модель: {settings.llm_model} | Лимит: {limit} карточек")
-    result = enrich_news_cards(provider, min_score=min_score, limit=limit, reprocess=reprocess)
+    result = enrich_news_cards(provider, min_score=min_score, limit=limit, reprocess=reprocess, since_days=since_days)
 
     typer.echo(f"""
 ✓ Обогащение завершено
@@ -409,6 +410,7 @@ def enrich_backlog_cmd(
     max_batches: int = typer.Option(10, "--max-batches", "-n", help="Сколько порций обработать"),
     pause_seconds: int = typer.Option(30, "--pause", help="Пауза между порциями (секунд)"),
     min_score: int = typer.Option(20, "--min-score", help="Мин. score для обогащения"),
+    since_days: int | None = typer.Option(None, "--since-days", help="Только карточки за последние N дней"),
 ) -> None:
     """Разгрести очередь необработанных карточек порциями с паузами между ними.
 
@@ -437,7 +439,7 @@ def enrich_backlog_cmd(
 
     for batch_num in range(1, max_batches + 1):
         typer.echo(f"\n── Порция {batch_num}/{max_batches} ──")
-        result = enrich_news_cards(provider, min_score=min_score, limit=batch_size)
+        result = enrich_news_cards(provider, min_score=min_score, limit=batch_size, since_days=since_days)
 
         typer.echo(
             f"  relevant={result.relevant} irrelevant={result.irrelevant} "

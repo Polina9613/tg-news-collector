@@ -483,3 +483,46 @@ def test_reasoning_exhaustion_error_recognized(mem_db):
     with gs() as s:
         c = s.get(NewsCard, card_id)
         assert c.llm_retry_after is not None
+
+
+def test_enrich_respects_since_days(mem_db):
+    """since_days фильтрует старые карточки — обрабатываются только свежие."""
+    engine, gs = mem_db
+    _src_id, post_id_old = _create_source_and_post(gs, suffix="_sinceA")
+    _src_id2, post_id_new = _create_source_and_post(gs, suffix="_sinceB")
+
+    with gs() as s:
+        old_card = NewsCard(
+            raw_post_id=post_id_old,
+            title="Old",
+            clean_text="old text",
+            source_title="Test",
+            post_url="https://t.me/sinceA/1",
+            published_at=datetime.utcnow() - timedelta(days=30),
+            relevance_score=80,
+            relevance_label="high",
+            llm_enriched=False,
+        )
+        new_card = NewsCard(
+            raw_post_id=post_id_new,
+            title="New",
+            clean_text="new text",
+            source_title="Test",
+            post_url="https://t.me/sinceB/1",
+            published_at=datetime.utcnow() - timedelta(days=2),
+            relevance_score=80,
+            relevance_label="high",
+            llm_enriched=False,
+        )
+        s.add_all([old_card, new_card])
+
+    mock_provider = MagicMock()
+    mock_provider.check_relevance_and_classify.return_value = {
+        "relevant": False, "relevance_reason": "test", "type": "news", "case_count": 0,
+    }
+
+    from llm.enricher import enrich_news_cards
+    with patch("llm.enricher.time.sleep"):
+        result = enrich_news_cards(mock_provider, min_score=0, limit=10, since_days=14)
+
+    assert result.total == 1  # только new_card, old_card вне окна

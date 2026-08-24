@@ -192,6 +192,7 @@ def enrich_news_cards(
     limit: int = 30,
     reprocess: bool = False,
     fallback_provider=None,
+    since_days: int | None = None,
 ) -> EnrichResult:
     """
     Многоступенчатое обогащение карточек:
@@ -224,6 +225,9 @@ def enrich_news_cards(
                 NewsCard.llm_retry_after <= datetime.utcnow(),
             )
         )
+        if since_days is not None:
+            since_dt = datetime.utcnow() - timedelta(days=since_days)
+            query = query.filter(NewsCard.published_at >= since_dt)
         query = query.order_by(NewsCard.relevance_score.desc())
         card_ids = [c.id for c in query.limit(limit).all()]
 
