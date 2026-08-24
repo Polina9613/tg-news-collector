@@ -403,6 +403,61 @@ def enrich_all(
 """)
 
 
+@app.command(name="enrich-backlog")
+def enrich_backlog_cmd(
+    batch_size: int = typer.Option(20, "--batch-size", "-b", help="Карточек за одну порцию"),
+    max_batches: int = typer.Option(10, "--max-batches", "-n", help="Сколько порций обработать"),
+    pause_seconds: int = typer.Option(30, "--pause", help="Пауза между порциями (секунд)"),
+    min_score: int = typer.Option(20, "--min-score", help="Мин. score для обогащения"),
+) -> None:
+    """Разгрести очередь необработанных карточек порциями с паузами между ними.
+
+    Останавливается если очередь пуста или достигнут max_batches.
+    """
+    import time as _time
+
+    _safe_setup_logging()
+    settings = get_settings()
+
+    from llm.enricher import enrich_news_cards
+    from llm.factory import create_llm_provider
+
+    try:
+        provider = create_llm_provider(settings)
+    except Exception as e:
+        typer.echo(f"✗ Ошибка инициализации LLM: {e}")
+        raise typer.Exit(code=1)
+
+    if not provider.is_available():
+        typer.echo(f"✗ {settings.llm_provider} недоступен — проверьте настройки.")
+        raise typer.Exit(code=1)
+
+    total_cases = 0
+    total_errors = 0
+
+    for batch_num in range(1, max_batches + 1):
+        typer.echo(f"\n── Порция {batch_num}/{max_batches} ──")
+        result = enrich_news_cards(provider, min_score=min_score, limit=batch_size)
+
+        typer.echo(
+            f"  relevant={result.relevant} irrelevant={result.irrelevant} "
+            f"news_only={result.news_only} digest_only={result.digest_only} "
+            f"cases={result.cases_created} errors={result.errors}"
+        )
+        total_cases += result.cases_created
+        total_errors += result.errors
+
+        if result.total == 0:
+            typer.echo("Очередь пуста, останавливаюсь.")
+            break
+
+        if batch_num < max_batches:
+            typer.echo(f"  Пауза {pause_seconds} сек...")
+            _time.sleep(pause_seconds)
+
+    typer.echo(f"\n✓ Итого: cases_created={total_cases}, errors={total_errors}")
+
+
 @app.command()
 def digest(
     days: int = typer.Option(7, help="За сколько дней формировать дайджест"),

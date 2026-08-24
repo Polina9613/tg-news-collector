@@ -386,23 +386,49 @@ def enrich_news_cards(
             logger.error(f"Enrich error card_id={card_id}: {e}")
 
             is_timeout = "timed out" in error_str.lower() or "timeout" in error_str.lower()
-            is_empty = "empty response" in error_str.lower() or "NoneType" in error_str
-            is_rate_limit = "429" in error_str or "Too Many Requests" in error_str
+            is_empty = (
+                "empty response" in error_str.lower()
+                or "nonetype" in error_str.lower()
+                or "not subscriptable" in error_str.lower()
+                or "exhausted max_tokens" in error_str.lower()
+            )
+            is_rate_limit = "429" in error_str or "too many requests" in error_str.lower()
+            is_server_error = (
+                "500" in error_str or "502" in error_str
+                or "503" in error_str or "524" in error_str
+                or "internal server error" in error_str.lower()
+                or "bad gateway" in error_str.lower()
+            )
 
-            if is_timeout or is_empty or is_rate_limit:
+            is_known_transient_error = is_timeout or is_empty or is_rate_limit or is_server_error
+
+            if is_known_transient_error:
                 with get_session() as _s:
                     _card = _s.get(NewsCard, card_id)
                     if _card:
                         _card.llm_retry_after = datetime.utcnow() + timedelta(hours=2)
-                        reason = "timeout" if is_timeout else ("empty" if is_empty else "rate_limit")
+                        error_type = (
+                            "timeout" if is_timeout
+                            else "empty" if is_empty
+                            else "rate_limit" if is_rate_limit
+                            else "server_error"
+                        )
                         logger.warning(
-                            f"card_id={card_id} sent to back of queue ({reason})"
+                            f"card_id={card_id} sent to back of queue ({error_type})"
                             f" — retry after 2h"
                         )
-
-                if is_timeout or is_rate_limit:
+                if is_timeout or is_rate_limit or is_server_error:
                     logger.warning("Stopping current enrich cycle early")
                     break
+            else:
+                with get_session() as _s:
+                    _card = _s.get(NewsCard, card_id)
+                    if _card:
+                        _card.llm_retry_after = datetime.utcnow() + timedelta(hours=1)
+                        logger.warning(
+                            f"card_id={card_id} unknown error, sent to retry queue (1h): "
+                            f"{error_str[:200]}"
+                        )
 
         time.sleep(10)
 

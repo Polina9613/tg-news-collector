@@ -177,8 +177,15 @@ class GroqProvider:
             response.raise_for_status()
             data = response.json()
             usage = data.get("usage", {}) or {}
-            content = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            content = choice["message"]["content"]
+            finish_reason = choice.get("finish_reason", "")
             if not content:
+                if finish_reason == "length":
+                    raise ValueError(
+                        "Model exhausted max_tokens on reasoning (0 reasoning tokens) "
+                        "before producing content. Increase max_tokens for this call."
+                    )
                 raise ValueError("Empty response from Groq API")
             response_content = content.strip()
             return response_content
@@ -349,7 +356,7 @@ class GroqProvider:
             f'Ответ JSON: {{"relevant": true/false, "relevance_reason": "кратко", '
             f'"type": "case"/"news"/"digest"/null, "case_count": 0}}'
         )
-        raw = self._call(_RELEVANCE_SYSTEM, user, max_tokens=200)
+        raw = self._call(_RELEVANCE_SYSTEM, user, max_tokens=600)
         try:
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             data = json.loads(match.group()) if match else {}
@@ -413,7 +420,7 @@ class GroqProvider:
             f'"how_it_works": "..." или null, "value": "...", '
             f'"market": "Россия"/"Мир"/"Россия и мир", "industry": "..."}}]'
         )
-        raw = self._call(_EXTRACT_CASES_SYSTEM, user, max_tokens=1200)
+        raw = self._call(_EXTRACT_CASES_SYSTEM, user, max_tokens=1800)
         try:
             match = re.search(r'\[.*\]', raw, re.DOTALL)
             cases = json.loads(match.group()) if match else []
@@ -458,7 +465,7 @@ class GroqProvider:
             f'"new_trend_description": null, "reasoning": "кратко"}}'
         )
 
-        raw = self._call(system, user, max_tokens=300)
+        raw = self._call(system, user, max_tokens=700)
         try:
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             data = json.loads(match.group()) if match else {}

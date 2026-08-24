@@ -439,3 +439,47 @@ def test_card_sent_to_back_of_queue_on_timeout(mem_db):
         c = s.get(NewsCard, card_id)
         assert c.llm_enriched is False
         assert c.llm_retry_after is not None
+
+
+def test_unknown_error_still_gets_retry_after(mem_db):
+    """Неизвестная ошибка тоже отправляет карточку в очередь повтора (1ч)."""
+    engine, gs = mem_db
+    _src_id, post_id = _create_source_and_post(gs, suffix="_unknown_err")
+    card_id = _create_card(gs, post_id, score=80, enriched=False)
+
+    mock_provider = MagicMock()
+    mock_provider.check_relevance_and_classify.side_effect = Exception(
+        "Some new unrecognized error"
+    )
+
+    from llm.enricher import enrich_news_cards
+    with patch("llm.enricher.time.sleep"):
+        result = enrich_news_cards(mock_provider, min_score=0, limit=1)
+
+    assert result.errors == 1
+    with gs() as s:
+        c = s.get(NewsCard, card_id)
+        assert c.llm_enriched is False
+        assert c.llm_retry_after is not None
+
+
+def test_reasoning_exhaustion_error_recognized(mem_db):
+    """'exhausted max_tokens on reasoning' классифицируется как is_empty → retry queue."""
+    engine, gs = mem_db
+    _src_id, post_id = _create_source_and_post(gs, suffix="_reasoning_err")
+    card_id = _create_card(gs, post_id, score=80, enriched=False)
+
+    mock_provider = MagicMock()
+    mock_provider.check_relevance_and_classify.side_effect = ValueError(
+        "Model exhausted max_tokens on reasoning (20 reasoning tokens) "
+        "before producing content. Increase max_tokens for this call."
+    )
+
+    from llm.enricher import enrich_news_cards
+    with patch("llm.enricher.time.sleep"):
+        result = enrich_news_cards(mock_provider, min_score=0, limit=1)
+
+    assert result.errors == 1
+    with gs() as s:
+        c = s.get(NewsCard, card_id)
+        assert c.llm_retry_after is not None
