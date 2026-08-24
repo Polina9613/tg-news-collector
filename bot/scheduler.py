@@ -102,7 +102,7 @@ async def auto_pipeline_cycle(bot: Bot) -> None:
         return enrich_news_cards(
             provider,
             min_score=settings.llm_min_score,
-            limit=5,
+            limit=20,
             fallback_provider=fallback,
         )
 
