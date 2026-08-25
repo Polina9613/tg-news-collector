@@ -79,7 +79,7 @@ def generate_digest(
     }
 
     # Динамика — сравнение с прошлыми неделями (если они есть)
-    past_snapshots = _load_past_snapshots(before=period_start, limit=3)
+    past_snapshots = _load_past_snapshots(before=period_start, limit=5)
 
     current_index = []
     for topic, tcases in topics.items():

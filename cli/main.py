@@ -497,12 +497,13 @@ def digest(
 @app.command(name="backfill-snapshots")
 def backfill_snapshots_cmd(
     weeks: int = typer.Option(2, "--weeks", "-w", help="За сколько недель назад восстановить снимки"),
+    force: bool = typer.Option(False, "--force", help="Пересчитать даже если снимок уже есть (перезаписать пустые)"),
 ) -> None:
     """Восстановить WeeklySnapshot за последние N недель с LLM-анализом.
 
     Использует кейсы уже накопленные в БД. Пропускает недели для которых
-    снимок уже существует. Дальше снимки сохраняются автоматически при
-    каждой генерации /digest.
+    снимок уже существует и не пустой. С --force пересчитывает пустые снимки
+    (без main_summary) и перезаписывает любые существующие снимки.
     """
     import json
     from datetime import timedelta
@@ -513,7 +514,7 @@ def backfill_snapshots_cmd(
     from db.base import get_session
     from db.models import NewsCard, Trend, TrendCase, WeeklySnapshot
     from digest.generator import _group_by_topic
-    from digest.llm_digest import generate_digest_analysis
+    from digest.llm_digest import generate_main_summary, generate_topic_analysis
     from llm.factory import create_llm_provider
 
     try:
@@ -529,6 +530,7 @@ def backfill_snapshots_cmd(
     now = datetime.utcnow()
     created = 0
     skipped = 0
+    updated = 0
 
     # От старых недель к новым — чтобы при генерации динамики для недели N-1
     # уже был снимок недели N-2
@@ -548,10 +550,11 @@ def backfill_snapshots_cmd(
                 .filter(WeeklySnapshot.period_start <= period_start + timedelta(hours=12))
                 .first()
             )
-            if existing:
+            is_empty = existing and not existing.main_summary
+            if existing and not (force or is_empty):
                 skipped += 1
                 typer.echo(
-                    f"  Неделя {period_start.date()}–{period_end.date()}: снимок уже есть, пропуск"
+                    f"  Неделя {period_start.date()}–{period_end.date()}: снимок уже есть и не пустой, пропуск"
                 )
                 continue
 
@@ -589,17 +592,17 @@ def backfill_snapshots_cmd(
                     "trend_category": topic_category,
                     "relevance_score": nc.relevance_score if nc else 0,
                 })
+            existing_id = existing.id if existing else None
 
         topics = _group_by_topic(cases)
-        top_cases_for_context = sorted(
-            cases, key=lambda c: c.get("relevance_score", 0), reverse=True
-        )[:15]
+        top_cases = sorted(cases, key=lambda c: c.get("relevance_score", 0), reverse=True)[:10]
 
         typer.echo(
             f"  Неделя {period_start.date()}–{period_end.date()}: "
-            f"{len(cases)} кейсов, запрашиваю LLM-анализ..."
+            f"{len(cases)} кейсов, запрашиваю LLM..."
         )
-        analysis = generate_digest_analysis(provider, top_cases_for_context, topics)
+        main_summary = generate_main_summary(provider, top_cases)
+        topic_analysis = generate_topic_analysis(provider, topics)
 
         compact_index = [
             {
@@ -612,22 +615,29 @@ def backfill_snapshots_cmd(
         ]
 
         with get_session() as s:
-            s.add(WeeklySnapshot(
-                period_start=period_start,
-                period_end=period_end,
-                main_summary=analysis.get("main_summary", ""),
-                overall_conclusions=json.dumps(
-                    analysis.get("overall_conclusions", []), ensure_ascii=False
-                ),
-                compact_case_index=json.dumps(compact_index, ensure_ascii=False),
-            ))
-        created += 1
-        typer.echo(
-            f"    Сохранено: {len(compact_index)} кейсов, "
-            f"{len(analysis.get('overall_conclusions', []))} выводов"
-        )
+            if existing_id:
+                db_snap = s.get(WeeklySnapshot, existing_id)
+                db_snap.main_summary = main_summary
+                db_snap.overall_conclusions = json.dumps(
+                    topic_analysis.get("overall_conclusions", []), ensure_ascii=False
+                )
+                db_snap.compact_case_index = json.dumps(compact_index, ensure_ascii=False)
+                updated += 1
+                typer.echo(f"    ✓ Обновлено: {len(compact_index)} кейсов")
+            else:
+                s.add(WeeklySnapshot(
+                    period_start=period_start,
+                    period_end=period_end,
+                    main_summary=main_summary,
+                    overall_conclusions=json.dumps(
+                        topic_analysis.get("overall_conclusions", []), ensure_ascii=False
+                    ),
+                    compact_case_index=json.dumps(compact_index, ensure_ascii=False),
+                ))
+                created += 1
+                typer.echo(f"    ✓ Создано: {len(compact_index)} кейсов")
 
-    typer.echo(f"\n Готово: создано {created} снимков, пропущено {skipped}")
+    typer.echo(f"\n✓ Готово: создано {created}, обновлено {updated}, пропущено {skipped}")
 
 
 @app.command(name="clean-source-duplicates")
