@@ -900,9 +900,9 @@ def llm_check() -> None:
         raise typer.Exit(code=1)
 
     if settings.llm_provider == "deepseek":
-        typer.echo(f"Провайдер: deepseek (через artemox proxy)")
+        typer.echo(f"Провайдер: deepseek (официальный API)")
         typer.echo(f"Модель:    {settings.llm_model}")
-        typer.echo(f"URL:       https://api.artemox.com/v1")
+        typer.echo(f"URL:       https://api.deepseek.com")
     elif settings.llm_provider == "yandex":
         typer.echo(f"Провайдер: {settings.llm_provider}")
         typer.echo(f"Folder ID: {settings.yandex_folder_id or '—'}")

@@ -22,7 +22,7 @@ def create_llm_provider(settings: Settings):
         from llm.deepseek_provider import DeepSeekProvider
         if not settings.llm_api_key:
             raise ValueError("Для DeepSeek нужен LLM_API_KEY в .env")
-        logger.info(f"Using DeepSeek provider: {settings.llm_model} via artemox proxy")
+        logger.info(f"Using DeepSeek provider: {settings.llm_model} via official API")
         return DeepSeekProvider(
             api_key=settings.llm_api_key,
             model=settings.llm_model,
