@@ -42,13 +42,13 @@ _POSTS_WIDTHS: dict[str, int] = {
 _CASES_COLS = [
     "Дата", "Источник", "Тренд", "Кейс", "Компания",
     "Описание", "Как работает", "Ценность", "Рынок", "Ссылка", "Заголовок поста",
-    "Тренд ID", "Период",
+    "Тренд ID", "Период", "Важность",
 ]
 
 _CASES_WIDTHS: dict[str, int] = {
     "A": 18, "B": 20, "C": 30, "D": 40, "E": 25,
     "F": 60, "G": 50, "H": 40, "I": 15, "J": 14, "K": 45,
-    "L": 8, "M": 10,
+    "L": 8, "M": 10, "N": 10,
 }
 
 _TRENDS_COLS = ["ID", "Тренд", "Описание", "Кейсов", "Первый кейс", "Обновлён"]
@@ -242,6 +242,7 @@ def _case_to_row(case: TrendCase) -> dict:
         "Заголовок поста": nc.title or "" if nc else "",
         "Тренд ID": case.trend_id or "",
         "Период": case.period_label or "",
+        "Важность": case.importance_score or 50,
         "_url": case.source_url or "",
     }
 

@@ -59,7 +59,7 @@ def generate_digest(
         logger.info(f"Digest: topics reduced to {len(topics)} (top {MAX_TOPICS_IN_DIGEST} + Другое)")
 
     top_cases_for_context = sorted(
-        cases, key=lambda c: c.get("relevance_score", 0), reverse=True
+        cases, key=lambda c: c.get("importance_score", 50), reverse=True
     )[:10]
 
     if cases:
@@ -130,6 +130,8 @@ def _load_cases(since: datetime, until: datetime, limit: int) -> list[dict]:
             .all()
         )
 
+        MIN_IMPORTANCE = 60  # порог по TrendCase.importance_score
+
         filtered = []
         for tc, nc, tr in rows:
             effective_date = nc.published_at if nc else tc.created_at
@@ -137,12 +139,11 @@ def _load_cases(since: datetime, until: datetime, limit: int) -> list[dict]:
                 continue
             if not (since <= effective_date < until):
                 continue
-            # Сохраняем только достаточно релевантные карточки (или ручные кейсы без NewsCard)
-            if nc is not None and (nc.relevance_score or 0) < 85:
+            if (tc.importance_score or 50) < MIN_IMPORTANCE:
                 continue
             filtered.append((tc, nc, tr, effective_date))
 
-        filtered.sort(key=lambda x: (x[1].relevance_score if x[1] else 0), reverse=True)
+        filtered.sort(key=lambda x: (x[0].importance_score or 50), reverse=True)
 
         return [
             {
@@ -158,6 +159,7 @@ def _load_cases(since: datetime, until: datetime, limit: int) -> list[dict]:
                 "market": tc.market,
                 "industry": tc.industry,
                 "relevance_score": nc.relevance_score if nc else 0,
+                "importance_score": tc.importance_score or 50,
                 "published_at": effective_date,
             }
             for tc, nc, tr, effective_date in filtered[:limit]
