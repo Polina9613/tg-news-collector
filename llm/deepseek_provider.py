@@ -1,10 +1,10 @@
 """
-LLM-провайдер для DeepSeek через OpenAI-совместимый прокси.
+LLM-провайдер для официального DeepSeek API (api.deepseek.com).
 
-Эндпоинт: https://api.artemox.com/v1/chat/completions
+Эндпоинт: https://api.deepseek.com/chat/completions
 Авторизация: Authorization: Bearer <ключ>
-Модель: deepseek-chat
-Формат: OpenAI Chat Completions (полностью совместимый)
+Модель: deepseek-chat (НЕ reasoning-модель по умолчанию)
+Формат: OpenAI Chat Completions API
 """
 import json
 import re
@@ -13,7 +13,7 @@ import time
 import httpx
 from loguru import logger
 
-DEEPSEEK_API_URL = "https://api.artemox.com/v1/chat/completions"
+DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 
 INDUSTRIES_LIST = (
     "Финтех / банки, Ритейл / e-commerce, Телеком, ИТ / разработка ПО, "
@@ -96,8 +96,8 @@ _ASSIGN_TREND_SYSTEM_TEMPLATE = """Ты — методолог трендвот�
 По умолчанию выбирай "existing" или "none". "new" — редкое исключение.
 Отвечай строго JSON без пояснений."""
 
-_EXTRACT_CASES_SYSTEM = """Ты — аналитик финтех-рынка.
-Извлекаешь структурированные данные о кейсах строго из текста, без додумывания.
+_EXTRACT_CASES_SYSTEM = """Ты — аналитик финтех-рынка, готовящий дайджест
+для команды трендвотчинга крупного российского банка.
 
 ВАЖНО — company: это компания УПОМЯНУТАЯ В ТЕКСТЕ ПОСТА.
 Если в тексте нет явного названия компании — поставь null.
@@ -119,6 +119,32 @@ _EXTRACT_CASES_SYSTEM = """Ты — аналитик финтех-рынка.
 Финтех / банки, Ритейл / e-commerce, Телеком, ИТ / разработка ПО,
 Промышленность, Госсектор / регуляторика, Образование, Здравоохранение,
 Транспорт / логистика, Медиа / контент, Другое
+
+ОЦЕНКА ВАЖНОСТИ КЕЙСА (importance_score, 0-100):
+Читатель — аналитик банка, который следит за тем как технологии и продукты
+меняют финансовую отрасль, и должен принимать решения о том куда банку
+двигаться дальше. Оценивай важность именно для ЭТОЙ аудитории.
+
+ВЫСОКИЙ балл (80-100) — кейс прямо касается банковских технологий и продуктов:
+— Банк/финтех-компания запускает новый продукт, технологию, партнёрство
+— Платежи, биометрия, ИИ в банкинге/скоринге/обслуживании клиентов
+— Регулирование финансового рынка, ЦБ, законы о криптовалюте/цифровом рубле
+— Кибербезопасность и антифрод в финансовых операциях
+— Крупная сделка/инвестиция/санкции затрагивающие банк или платёжную систему
+— Технологии (ИИ-агенты, биометрия, блокчейн) применимые в банке,
+  даже если пример взят из другой отрасли (ритейл, телеком)
+
+СРЕДНИЙ балл (50-79) — косвенно полезно для трендвотчинга:
+— Общие технологические тренды без прямой привязки к финансам,
+  но потенциально применимые в банке
+— Кейсы других отраслей с паттерном интересным для банка
+
+НИЗКИЙ балл (0-49) — на периферии интереса аналитика банка:
+— Технологические новости без связи с финансами, платежами, банкингом
+— Корпоративные новости без продуктового/технологического контекста
+— Общественно-политические новости без прямого влияния на финтех-рынок
+
+Внутри диапазона: крупная компания + измеримый эффект + новизна → выше.
 
 Отвечай только JSON-массивом без пояснений и markdown."""
 
@@ -409,7 +435,7 @@ class DeepSeekProvider:
             f'Ответ JSON: {{"relevant": true/false, "relevance_reason": "кратко", '
             f'"type": "case"/"news"/"digest"/null, "case_count": 0}}'
         )
-        raw = self._call(_RELEVANCE_SYSTEM, user, max_tokens=600, reasoning_effort="none")
+        raw = self._call(_RELEVANCE_SYSTEM, user, max_tokens=600)
         try:
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             data = json.loads(match.group()) if match else {}
@@ -471,9 +497,10 @@ class DeepSeekProvider:
             f"Извлеки кейсы. Ответ строго JSON-массив:\n"
             f'[{{"case_title": "...", "company": "...", "description": "...", '
             f'"how_it_works": "..." или null, "value": "...", '
-            f'"market": "Россия"/"Мир"/"Россия и мир", "industry": "..."}}]'
+            f'"market": "Россия"/"Мир"/"Россия и мир", "industry": "...", '
+            f'"importance_score": 85}}]'
         )
-        raw = self._call(_EXTRACT_CASES_SYSTEM, user, max_tokens=1800, reasoning_effort="none")
+        raw = self._call(_EXTRACT_CASES_SYSTEM, user, max_tokens=1800)
         try:
             match = re.search(r'\[.*\]', raw, re.DOTALL)
             cases = json.loads(match.group()) if match else []
@@ -518,7 +545,7 @@ class DeepSeekProvider:
             f'"new_trend_description": null, "reasoning": "кратко"}}'
         )
 
-        raw = self._call(system, user, max_tokens=700, reasoning_effort="none")
+        raw = self._call(system, user, max_tokens=700)
         try:
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             data = json.loads(match.group()) if match else {}

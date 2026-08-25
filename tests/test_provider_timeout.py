@@ -99,3 +99,19 @@ def test_groq_ignores_reasoning_effort_param():
     with patch("httpx.post", return_value=_make_mock_response()):
         result = provider._call("system", "user", reasoning_effort="low")
     assert result == "ok"
+
+
+# ── importance_score prompt tests ─────────────────────────────────────────────
+
+def test_extract_cases_importance_reflects_fintech_relevance():
+    """_EXTRACT_CASES_SYSTEM содержит ориентацию importance_score на банковского аналитика."""
+    from llm.deepseek_provider import _EXTRACT_CASES_SYSTEM as ds_system
+    from llm.groq_provider import _EXTRACT_CASES_SYSTEM as groq_system
+    from llm.yandex_provider import _EXTRACT_CASES_SYSTEM as ya_system
+
+    for prompt in (ds_system, groq_system, ya_system):
+        low = prompt.lower()
+        assert "аналитик" in low, "должно упоминаться 'аналитик'"
+        assert "банк" in low, "должно упоминаться 'банк'"
+        assert "платеж" in low or "платёж" in low, "должно упоминаться 'платёж'"
+        assert "importance_score" in low, "должна быть секция importance_score"

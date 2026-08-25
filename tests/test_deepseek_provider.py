@@ -28,7 +28,7 @@ def test_correct_endpoint(provider):
     with patch("llm.deepseek_provider.httpx.post", return_value=_make_response("ok")) as mock_post:
         provider._call("system", "user")
     url = mock_post.call_args.args[0]
-    assert "artemox.com" in url
+    assert "api.deepseek.com" in url
     assert url == DEEPSEEK_API_URL
 
 
