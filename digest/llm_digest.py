@@ -41,7 +41,7 @@ def generate_main_summary(provider, top_cases: list[dict]) -> str:
     try:
         from llm.call_logger import llm_call_context
         with llm_call_context("generate_main_summary", context_note="digest"):
-            raw = provider._call(_MAIN_SUMMARY_SYSTEM, user, max_tokens=1000, timeout=90, reasoning_effort="low")
+            raw = provider._call(_MAIN_SUMMARY_SYSTEM, user, max_tokens=1000, timeout=90, reasoning_effort="none")
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         data = json.loads(match.group()) if match else {}
         return data.get("main_summary", "")
@@ -89,7 +89,7 @@ def generate_topic_analysis(
     try:
         from llm.call_logger import llm_call_context
         with llm_call_context("generate_topic_analysis", context_note="digest"):
-            raw = provider._call(_TOPIC_ANALYSIS_SYSTEM, user, max_tokens=1600, timeout=120, reasoning_effort="low")
+            raw = provider._call(_TOPIC_ANALYSIS_SYSTEM, user, max_tokens=1600, timeout=120, reasoning_effort="none")
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         data = json.loads(match.group()) if match else {}
         return {
@@ -172,7 +172,7 @@ def generate_dynamics_section(
     try:
         from llm.call_logger import llm_call_context
         with llm_call_context("generate_dynamics_section", context_note="digest_dynamics"):
-            raw = provider._call(_DYNAMICS_SYSTEM, user, max_tokens=1500, timeout=120, reasoning_effort="low")
+            raw = provider._call(_DYNAMICS_SYSTEM, user, max_tokens=1500, timeout=120, reasoning_effort="none")
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         data = json.loads(match.group()) if match else {}
         return data.get("dynamics_points", [])

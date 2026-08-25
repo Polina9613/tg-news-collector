@@ -409,7 +409,7 @@ class DeepSeekProvider:
             f'Ответ JSON: {{"relevant": true/false, "relevance_reason": "кратко", '
             f'"type": "case"/"news"/"digest"/null, "case_count": 0}}'
         )
-        raw = self._call(_RELEVANCE_SYSTEM, user, max_tokens=600, reasoning_effort="low")
+        raw = self._call(_RELEVANCE_SYSTEM, user, max_tokens=600, reasoning_effort="none")
         try:
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             data = json.loads(match.group()) if match else {}
@@ -473,7 +473,7 @@ class DeepSeekProvider:
             f'"how_it_works": "..." или null, "value": "...", '
             f'"market": "Россия"/"Мир"/"Россия и мир", "industry": "..."}}]'
         )
-        raw = self._call(_EXTRACT_CASES_SYSTEM, user, max_tokens=1800, reasoning_effort="low")
+        raw = self._call(_EXTRACT_CASES_SYSTEM, user, max_tokens=1800, reasoning_effort="none")
         try:
             match = re.search(r'\[.*\]', raw, re.DOTALL)
             cases = json.loads(match.group()) if match else []
@@ -518,7 +518,7 @@ class DeepSeekProvider:
             f'"new_trend_description": null, "reasoning": "кратко"}}'
         )
 
-        raw = self._call(system, user, max_tokens=700, reasoning_effort="low")
+        raw = self._call(system, user, max_tokens=700, reasoning_effort="none")
         try:
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             data = json.loads(match.group()) if match else {}
