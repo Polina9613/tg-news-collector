@@ -334,6 +334,16 @@ def _seed_canonical_trends() -> None:
         logger.info(f"Migration: seeded {seeded} canonical trends")
 
 
+def migrate_add_importance_score() -> None:
+    """Добавляет importance_score в trend_cases если колонки ещё нет."""
+    with engine.connect() as conn:
+        existing = [r[1] for r in conn.execute(text("PRAGMA table_info(trend_cases)"))]
+        if "importance_score" not in existing:
+            conn.execute(text("ALTER TABLE trend_cases ADD COLUMN importance_score INTEGER"))
+            conn.commit()
+            logger.info("Migration: added importance_score to trend_cases")
+
+
 def init_db() -> None:
     migrate_remove_subscriptions()
     Base.metadata.create_all(engine)
@@ -348,6 +358,7 @@ def init_db() -> None:
     migrate_add_retry_after()
     migrate_llm_call_logs()
     migrate_weekly_snapshots()
+    migrate_add_importance_score()
 
 
 def get_db_stats() -> dict:

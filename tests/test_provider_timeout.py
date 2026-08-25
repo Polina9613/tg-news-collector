@@ -115,3 +115,47 @@ def test_extract_cases_importance_reflects_fintech_relevance():
         assert "банк" in low, "должно упоминаться 'банк'"
         assert "платеж" in low or "платёж" in low, "должно упоминаться 'платёж'"
         assert "importance_score" in low, "должна быть секция importance_score"
+
+
+# ── batch_score_importance tests ──────────────────────────────────────────────
+
+def test_batch_score_importance_returns_scores():
+    from unittest.mock import MagicMock
+    from llm.deepseek_provider import DeepSeekProvider
+
+    provider = DeepSeekProvider(api_key="test", model="deepseek-chat", timeout=60)
+    provider._call = MagicMock(return_value='{"scores": [90, 45, 70]}')
+
+    cases = [
+        {"case_title": "A", "company": "Сбер", "description": "desc"},
+        {"case_title": "B", "company": "X", "description": "desc"},
+        {"case_title": "C", "company": "Y", "description": "desc"},
+    ]
+    result = provider.batch_score_importance(cases)
+    assert result == [90, 45, 70]
+
+
+def test_batch_score_importance_handles_mismatched_length():
+    from unittest.mock import MagicMock
+    from llm.deepseek_provider import DeepSeekProvider
+
+    provider = DeepSeekProvider(api_key="test", model="deepseek-chat", timeout=60)
+    provider._call = MagicMock(return_value='{"scores": [90]}')
+
+    cases = [
+        {"case_title": "A", "company": "X", "description": ""},
+        {"case_title": "B", "company": "Y", "description": ""},
+        {"case_title": "C", "company": "Z", "description": ""},
+    ]
+    result = provider.batch_score_importance(cases)
+    assert len(result) == 3
+    assert result[0] == 90
+    assert result[1] == 50
+
+
+def test_batch_score_importance_empty_list():
+    from llm.deepseek_provider import DeepSeekProvider
+
+    provider = DeepSeekProvider(api_key="test", model="deepseek-chat", timeout=60)
+    result = provider.batch_score_importance([])
+    assert result == []

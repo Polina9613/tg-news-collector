@@ -640,6 +640,74 @@ def backfill_snapshots_cmd(
     typer.echo(f"\n✓ Готово: создано {created}, обновлено {updated}, пропущено {skipped}")
 
 
+@app.command(name="backfill-importance")
+def backfill_importance_cmd(
+    batch_size: int = typer.Option(15, "--batch-size", "-b", help="Кейсов на один LLM-вызов"),
+    days: int | None = typer.Option(None, "--days", "-d", help="Только кейсы за последние N дней"),
+) -> None:
+    """Проставляет importance_score задним числом для кейсов у которых он NULL.
+
+    Дешёвый batch-вызов: до batch_size кейсов оцениваются одним запросом.
+    """
+    import time as _time
+    from db.base import get_session
+    from db.models import TrendCase
+    from llm.factory import create_llm_provider
+
+    _safe_setup_logging()
+    settings = get_settings()
+
+    try:
+        provider = create_llm_provider(settings)
+    except Exception as e:
+        typer.echo(f"✗ Ошибка инициализации LLM: {e}")
+        raise typer.Exit(code=1)
+
+    with get_session() as s:
+        query = s.query(TrendCase).filter(TrendCase.importance_score.is_(None))
+        if days is not None:
+            since = datetime.utcnow() - timedelta(days=days)
+            query = query.filter(TrendCase.created_at >= since)
+        case_ids = [c.id for c in query.order_by(TrendCase.id).all()]
+
+    if not case_ids:
+        typer.echo("Нет кейсов без importance_score.")
+        return
+
+    typer.echo(
+        f"Найдено {len(case_ids)} кейсов без importance_score. "
+        f"Обрабатываю батчами по {batch_size}..."
+    )
+
+    total_updated = 0
+    for i in range(0, len(case_ids), batch_size):
+        batch_ids = case_ids[i:i + batch_size]
+
+        with get_session() as s:
+            batch_cases = s.query(TrendCase).filter(TrendCase.id.in_(batch_ids)).all()
+            id_order = {c.id: idx for idx, c in enumerate(batch_cases)}
+            batch_cases_sorted = sorted(batch_cases, key=lambda c: batch_ids.index(c.id))
+            cases_for_llm = [
+                {"case_title": c.case_title, "company": c.company, "description": c.description}
+                for c in batch_cases_sorted
+            ]
+
+        scores = provider.batch_score_importance(cases_for_llm)
+
+        with get_session() as s:
+            for case_id, score in zip(batch_ids, scores):
+                tc = s.get(TrendCase, case_id)
+                if tc:
+                    tc.importance_score = score
+                    total_updated += 1
+
+        typer.echo(f"  Обработано {min(i + batch_size, len(case_ids))}/{len(case_ids)}")
+        if i + batch_size < len(case_ids):
+            _time.sleep(2)
+
+    typer.echo(f"\n✓ Проставлено importance_score для {total_updated} кейсов")
+
+
 @app.command(name="clean-source-duplicates")
 def clean_source_duplicates_cmd(
     days: int = typer.Option(30, "--days", "-d", help="За сколько дней назад проверить"),

@@ -139,6 +139,7 @@ class TrendCase(Base):
     duplicate_of_case_id: Mapped[int | None] = mapped_column(
         ForeignKey("trend_cases.id"), default=None
     )
+    importance_score: Mapped[int | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     news_card: Mapped["NewsCard | None"] = relationship(back_populates="trend_cases")

@@ -149,6 +149,26 @@ _EXTRACT_CASES_SYSTEM = """Ты — аналитик финтех-рынка, г
 Отвечай только JSON-массивом без пояснений и markdown."""
 
 
+_IMPORTANCE_BATCH_SYSTEM = """Ты — аналитик, готовящий дайджест для команды
+трендвотчинга крупного российского банка. Оцениваешь важность уже
+извлечённых кейсов — без доступа к исходному тексту поста, только по кратким описаниям.
+
+Читатель — аналитик банка, следящий за технологиями и продуктами меняющими
+финансовую отрасль. Оценивай важность именно для этой аудитории.
+
+ВЫСОКИЙ балл (80-100): банковские технологии и продукты, платежи, биометрия,
+ИИ в банкинге/скоринге, регулирование финрынка, кибербезопасность финансов,
+крупные сделки/санкции затрагивающие банки, применимые к банку технологии
+из других отраслей.
+
+СРЕДНИЙ балл (50-79): общие технологические тренды применимые к банку косвенно.
+
+НИЗКИЙ балл (0-49): технологии без связи с финансами, кадровые новости без
+технологического контекста, общественно-политические новости без влияния на финтех.
+
+Отвечай строго JSON-массивом чисел в ТОМ ЖЕ ПОРЯДКЕ что и кейсы во входе."""
+
+
 class DeepSeekProvider:
     def __init__(self, api_key: str, model: str = "deepseek-chat", timeout: int = 60):
         self.api_key = api_key
@@ -563,3 +583,42 @@ class DeepSeekProvider:
                 "new_trend_name": None, "new_trend_description": None,
                 "reasoning": "parse error",
             }
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Batch-переоценка importance_score
+    # ══════════════════════════════════════════════════════════════════════
+
+    def batch_score_importance(self, cases: list[dict]) -> list[int]:
+        """
+        Дешёвая batch-оценка importance_score для уже извлечённых кейсов.
+        cases: список {"case_title", "company", "description"}.
+        Возвращает список чисел той же длины и в том же порядке.
+        """
+        if not cases:
+            return []
+
+        cases_text = "\n".join(
+            f"{i+1}. [{c.get('company', '—')}] {c.get('case_title', '')} — {(c.get('description') or '')[:150]}"
+            for i, c in enumerate(cases)
+        )
+        user = (
+            f"Оцени важность каждого кейса от 0 до 100 по описанным критериям.\n\n"
+            f"Кейсы:\n{cases_text}\n\n"
+            f'Ответ строго JSON: {{"scores": [число, число, ...]}}\n'
+            f"Массив scores должен содержать ровно {len(cases)} чисел в том же порядке."
+        )
+
+        try:
+            from llm.call_logger import llm_call_context
+            with llm_call_context("batch_score_importance", context_note=f"backfill: {len(cases)} cases"):
+                raw = self._call(_IMPORTANCE_BATCH_SYSTEM, user, max_tokens=400)
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            data = json.loads(match.group()) if match else {}
+            scores = data.get("scores", [])
+            if len(scores) != len(cases):
+                logger.warning(f"batch_score_importance: expected {len(cases)} scores, got {len(scores)}")
+                scores = (scores + [50] * len(cases))[:len(cases)]
+            return [max(0, min(100, int(s))) for s in scores]
+        except Exception as e:
+            logger.warning(f"batch_score_importance failed: {e}")
+            return [50] * len(cases)
