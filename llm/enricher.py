@@ -346,6 +346,8 @@ def enrich_news_cards(
                         logger.debug(f"  → duplicate of #{dup_of}")
 
                     # Создаём TrendCase
+                    raw_score = case_data.get("importance_score")
+                    importance = max(0, min(100, int(raw_score))) if raw_score is not None else None
                     tc = TrendCase(
                         news_card_id=card.id,
                         trend_id=trend_id,
@@ -358,6 +360,7 @@ def enrich_news_cards(
                         market=case_data.get("market"),
                         industry=case_data.get("industry"),
                         source_url=case_data.get("source_url"),
+                        importance_score=importance,
                         is_duplicate=is_dup,
                         duplicate_of_case_id=dup_of,
                         period_label=(
@@ -367,6 +370,10 @@ def enrich_news_cards(
                     session.add(tc)
                     session.flush()
                     result.cases_created += 1
+                    logger.debug(
+                        f"  → TrendCase id={tc.id} importance={importance} "
+                        f"dup={is_dup} title={tc.case_title!r:.50}"
+                    )
 
                     # Создаём pending тренд если LLM предложила новый
                     if decision == "new":
@@ -438,9 +445,16 @@ def enrich_news_cards(
 
     llm_calls_saved = result.pre_filtered + result.early_duplicates
     logger.info(
-        f"Enrich done: relevant={result.relevant} irrelevant={result.irrelevant} "
-        f"news_only={result.news_only} digest_only={result.digest_only} "
-        f"cases={result.cases_created} pre_filtered={result.pre_filtered} "
-        f"early_dup={result.early_duplicates} errors={result.errors}"
+        f"Enrich done: total={result.total} relevant={result.relevant} "
+        f"irrelevant={result.irrelevant} news_only={result.news_only} "
+        f"digest_only={result.digest_only} cases={result.cases_created} "
+        f"pre_filtered={result.pre_filtered} early_dup={result.early_duplicates} "
+        f"errors={result.errors}"
     )
+    if result.total > 0 and result.cases_created == 0 and result.relevant > 0:
+        logger.warning(
+            f"Enrich: {result.relevant} relevant posts but 0 cases created — "
+            f"news_only={result.news_only} digest_only={result.digest_only} "
+            f"check classify prompts or provider responses"
+        )
     return result
