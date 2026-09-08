@@ -127,6 +127,9 @@ def _set_column_widths(ws: Worksheet, widths: dict[str, int]) -> None:
         ws.column_dimensions[letter].width = width
 
 
+_HYPERLINK_FONT = Font(color="0563C1", underline="single")
+
+
 def _apply_hyperlinks(
     ws: Worksheet,
     col_idx: int,
@@ -134,10 +137,21 @@ def _apply_hyperlinks(
     url_key: str = "_url",
     link_text: str = "Открыть",
 ) -> None:
+    """Пишет нативный openpyxl-гиперлинк (cell.hyperlink), а не формулу
+    =HYPERLINK(). Формула не имеет закэшированного значения пока файл не
+    откроют в Excel и он не пересчитает формулы — поэтому pandas.read_excel()
+    и openpyxl(data_only=True) читают такие ячейки как None. Нативный
+    hyperlink хранит текст в cell.value напрямую и читается корректно любым
+    инструментом, оставаясь кликабельным в Excel."""
     for i, row in enumerate(data_rows, start=2):
         url = row.get(url_key) or ""
         cell = ws.cell(row=i, column=col_idx)
-        cell.value = f'=HYPERLINK("{url}", "{link_text}")' if url else ""
+        if url:
+            cell.value = link_text
+            cell.hyperlink = url
+            cell.font = _HYPERLINK_FONT
+        else:
+            cell.value = ""
 
 
 def _format_sheet(

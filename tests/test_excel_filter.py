@@ -146,3 +146,47 @@ class TestExcelDaysFilter:
         from exporter.excel import export_to_excel
         path = export_to_excel(output_path=out, days=7)
         assert path == out
+
+
+class TestExcelHyperlinks:
+    """Регрессия на баг: =HYPERLINK() формула не имеет закэшированного значения
+    пока файл не откроют в Excel, поэтому pandas.read_excel() и
+    openpyxl(data_only=True) читают такие ячейки как None. Должен использоваться
+    нативный cell.hyperlink, который читается корректно любым инструментом."""
+
+    def test_post_url_readable_via_data_only(self, mem_db):
+        engine, gs, tmp_path = mem_db
+        _insert_card(gs, days_old=1, source_suffix="_link")
+
+        from exporter.excel import export_to_excel
+        path = export_to_excel(output_path=str(tmp_path / "links.xlsx"), days=7)
+
+        wb = openpyxl.load_workbook(path, data_only=True)
+        ws = wb["news_cards"]
+        # "Ссылка на пост" — 4-я колонка (Дата, Источник, Заголовок, Ссылка на пост)
+        cell = ws.cell(row=2, column=4)
+        assert cell.value == "Открыть"
+
+    def test_post_url_readable_via_pandas(self, mem_db):
+        engine, gs, tmp_path = mem_db
+        _insert_card(gs, days_old=1, source_suffix="_pd")
+
+        from exporter.excel import export_to_excel
+        path = export_to_excel(output_path=str(tmp_path / "links_pd.xlsx"), days=7)
+
+        import pandas as pd
+        df = pd.read_excel(path, sheet_name="news_cards")
+        assert df["Ссылка на пост"].iloc[0] == "Открыть"
+
+    def test_hyperlink_target_is_actual_url(self, mem_db):
+        engine, gs, tmp_path = mem_db
+        _insert_card(gs, days_old=1, source_suffix="_target")
+
+        from exporter.excel import export_to_excel
+        path = export_to_excel(output_path=str(tmp_path / "links_target.xlsx"), days=7)
+
+        wb = openpyxl.load_workbook(path)
+        ws = wb["news_cards"]
+        cell = ws.cell(row=2, column=4)
+        assert cell.hyperlink is not None
+        assert cell.hyperlink.target == "https://t.me/test_target/1"

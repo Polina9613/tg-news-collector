@@ -150,42 +150,6 @@ def _build_channel_context(card) -> str | None:
     return f"канал «{card.source_title}»"
 
 
-def _check_duplicate(case: dict, since_days: int = 5) -> int | None:
-    """
-    Проверяет — есть ли уже похожий кейс в БД за последние N дней.
-    Похожий = та же компания + пересечение значимых слов в case_title > 50%.
-    """
-    company = case.get("company") or ""
-    case_title = case.get("case_title") or ""
-    if not company or not case_title:
-        return None
-
-    since = datetime.utcnow() - timedelta(days=since_days)
-    case_words = {w.lower() for w in case_title.split() if len(w) >= 4}
-    if not case_words:
-        return None
-
-    with get_session() as s:
-        candidates = (
-            s.query(TrendCase)
-            .filter(TrendCase.company == company)
-            .filter(TrendCase.created_at >= since)
-            .filter(TrendCase.is_duplicate == False)  # noqa: E712
-            .all()
-        )
-        for c in candidates:
-            if not c.case_title:
-                continue
-            other_words = {w.lower() for w in c.case_title.split() if len(w) >= 4}
-            if not other_words:
-                continue
-            overlap = len(case_words & other_words) / max(len(case_words), len(other_words))
-            if overlap > 0.5:
-                logger.debug(f"Duplicate detected: '{case_title}' ~ '{c.case_title}' ({overlap:.0%})")
-                return c.id
-    return None
-
-
 def enrich_news_cards(
     provider,
     min_score: int = 25,
@@ -338,13 +302,6 @@ def enrich_news_cards(
                     elif decision == "new":
                         logger.debug(f"  → trend: NEW '{trend_decision.get('new_trend_name')}'")
 
-                    # Проверка дублей
-                    dup_of = _check_duplicate(case_data)
-                    is_dup = dup_of is not None
-                    if is_dup:
-                        result.duplicates_marked += 1
-                        logger.debug(f"  → duplicate of #{dup_of}")
-
                     # Создаём TrendCase
                     raw_score = case_data.get("importance_score")
                     importance = max(0, min(100, int(raw_score))) if raw_score is not None else None
@@ -361,8 +318,6 @@ def enrich_news_cards(
                         industry=case_data.get("industry"),
                         source_url=case_data.get("source_url"),
                         importance_score=importance,
-                        is_duplicate=is_dup,
-                        duplicate_of_case_id=dup_of,
                         period_label=(
                             get_period_label(card.published_at) if card.published_at else None
                         ),
@@ -372,7 +327,7 @@ def enrich_news_cards(
                     result.cases_created += 1
                     logger.debug(
                         f"  → TrendCase id={tc.id} importance={importance} "
-                        f"dup={is_dup} title={tc.case_title!r:.50}"
+                        f"title={tc.case_title!r:.50}"
                     )
 
                     # Создаём pending тренд если LLM предложила новый

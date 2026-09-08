@@ -10,6 +10,7 @@ from docx.shared import Cm, Pt, RGBColor
 from loguru import logger
 from db.base import get_session
 from db.models import NewsCard, Trend, TrendCase
+from digest.dedup import dedupe_cases
 from digest.llm_digest import generate_main_summary, generate_topic_analysis
 
 COLOR_GREEN = RGBColor(0x1D, 0x9E, 0x75)
@@ -43,6 +44,14 @@ def generate_digest(
 
     cases = _load_cases(period_start, period_end, max_cases)
     logger.info(f"Digest: {len(cases)} cases (limit={max_cases}), period {period_start.date()}–{period_end.date()}")
+
+    def _llm_call(method_name: str, *args, **kwargs):
+        return getattr(provider, method_name)(*args, **kwargs)
+
+    cases, dropped_pairs = dedupe_cases(cases, llm_call=_llm_call)
+    if dropped_pairs:
+        logger.info(f"Digest dedup: {len(dropped_pairs)} republishing duplicate(s) removed")
+        _mark_duplicates_in_db(dropped_pairs)
 
     topics = _group_by_topic(cases)
 
@@ -147,6 +156,7 @@ def _load_cases(since: datetime, until: datetime, limit: int) -> list[dict]:
 
         return [
             {
+                "id": tc.id,
                 "trend_name": tc.trend_name or (tr.name if tr else ""),
                 "trend_category": (tr.category if tr else None) or tc.industry or "",
                 "case_title": tc.case_title,
@@ -164,6 +174,23 @@ def _load_cases(since: datetime, until: datetime, limit: int) -> list[dict]:
             }
             for tc, nc, tr, effective_date in filtered[:limit]
         ]
+
+
+def _mark_duplicates_in_db(dropped_pairs: list[tuple[dict, dict]]) -> None:
+    """Помечает исключённые дедупликацией кейсы в БД для аудита.
+    Необязательный шаг — сбой здесь не должен ронять генерацию дайджеста."""
+    try:
+        with get_session() as s:
+            for dropped, kept in dropped_pairs:
+                dropped_id = dropped.get("id")
+                if dropped_id is None:
+                    continue
+                tc = s.get(TrendCase, dropped_id)
+                if tc:
+                    tc.is_duplicate = True
+                    tc.duplicate_of_case_id = kept.get("id")
+    except Exception as e:
+        logger.warning(f"Digest dedup: failed to mark duplicates in DB: {e}")
 
 
 def _save_weekly_snapshot(
