@@ -73,16 +73,16 @@ def generate_digest(
 
     if cases:
         logger.info("LLM: главное за неделю...")
-        main_summary = generate_main_summary(provider, top_cases_for_context)
+        main_summary_clusters = generate_main_summary(provider, top_cases_for_context)
 
         logger.info("LLM: выводы по темам и векторы изменений...")
         topic_analysis = generate_topic_analysis(provider, topics)
     else:
-        main_summary = ""
+        main_summary_clusters = []
         topic_analysis = {"topic_conclusions": {}, "overall_conclusions": []}
 
     analysis = {
-        "main_summary": main_summary,
+        "main_summary_clusters": main_summary_clusters,
         "topic_conclusions": topic_analysis["topic_conclusions"],
         "overall_conclusions": topic_analysis["overall_conclusions"],
     }
@@ -229,7 +229,9 @@ def _save_weekly_snapshot(
         s.add(WeeklySnapshot(
             period_start=period_start,
             period_end=period_end,
-            main_summary=analysis.get("main_summary", ""),
+            main_summary=json.dumps(
+                analysis.get("main_summary_clusters", []), ensure_ascii=False
+            ),
             overall_conclusions=json.dumps(
                 analysis.get("overall_conclusions", []), ensure_ascii=False
             ),
@@ -303,13 +305,20 @@ def _build_docx(period_start, period_end, analysis: dict, topics: dict) -> Docum
 
     # ── Главное за неделю ──────────────────────────────────────────
     _add_heading(doc, "Главное за неделю", 1)
-    main_summary = analysis.get("main_summary", "")
-    if main_summary:
-        for paragraph_text in main_summary.split("\n\n"):
-            if paragraph_text.strip():
-                p = doc.add_paragraph(paragraph_text.strip())
+    main_summary_clusters = analysis.get("main_summary_clusters") or []
+    if main_summary_clusters:
+        for cluster in main_summary_clusters:
+            intro = cluster.get("intro") or ""
+            if intro:
+                p = doc.add_paragraph(intro)
                 for run in p.runs:
+                    run.font.bold = True
                     run.font.size = Pt(10)
+                    run.font.color.rgb = COLOR_DARK
+            for bullet in cluster.get("bullets") or []:
+                pb = doc.add_paragraph(style="List Bullet")
+                rb = pb.add_run(bullet)
+                rb.font.size = Pt(10)
     else:
         doc.add_paragraph("Недостаточно данных для обзора.")
 

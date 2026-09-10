@@ -174,23 +174,31 @@ _IMPORTANCE_BATCH_SYSTEM = """Ты — аналитик, готовящий да
 Отвечай строго JSON-массивом чисел в ТОМ ЖЕ ПОРЯДКЕ что и кейсы во входе."""
 
 
-_DUPLICATE_CHECK_SYSTEM = """Ты — редактор финтех-дайджеста, проверяющий дубликаты кейсов.
+_DUPLICATE_GROUPS_SYSTEM = """Ты — редактор финтех-дайджеста, ищущий дубликаты среди
+пула кейсов за период — republishing одного и того же реального события
+разными Telegram-каналами со своей формулировкой.
 
-Тебе даётся НОВЫЙ кейс и список КАНДИДАТОВ той же компании, уже сохранённых
-в базе за последние дни. Определи — описывает ли новый кейс ТО ЖЕ РЕАЛЬНОЕ
-СОБЫТИЕ/ДЕЙСТВИЕ, что один из кандидатов (например: разные Telegram-каналы
-пересказали одну и ту же новость своими словами), или это ДРУГОЕ событие
-той же компании (например: два разных продуктовых запуска на одной неделе).
+Тебе дан список кейсов (id, case_title, company, краткое description). Найди
+ГРУППЫ кейсов, которые описывают ОДНО И ТО ЖЕ РЕАЛЬНОЕ СОБЫТИЕ — та же
+компания и то же действие. Названия компаний в разных постах могут быть
+написаны по-разному — суди по смыслу, а не по точному совпадению строки:
+"Сбер" и "ПАО Сбербанк" — одна и та же компания, "Т-Банк" и "Тинькофф" —
+тоже одна и та же компания. Не полагайся на буквальное совпадение имени.
 
-Признаки ТОГО ЖЕ события: совпадает суть действия (что именно сделала
-компания), даже если формулировки, детали и акценты различаются.
+Признаки ТОГО ЖЕ события: совпадает суть действия (что именно произошло)
+и компания-герой, даже если формулировки, детали и акценты различаются.
 Признаки РАЗНЫХ событий: разные продукты, разные механики, разный контекст
-действия — даже если оба кейса про одну и ту же компанию.
+действия — даже если оба кейса про одну и ту же компанию (например два
+разных запуска продуктов на одной неделе — это НЕ дубли).
 
-При сомнении — считай событие ДРУГИМ (лучше пропустить дубль, чем ошибочно
-объединить два разных факта в один).
+ВАЖНО — консервативность: при любом сомнении считай кейсы РАЗНЫМИ
+событиями и не объединяй их в группу. Лучше пропустить дубль, чем
+ошибочно объединить два разных факта в один.
 
-Отвечай строго JSON: {"duplicate_of": id_кандидата_или_null, "reasoning": "кратко"}"""
+Верни ТОЛЬКО группы из 2 и более кейсов, описывающих одно и то же событие.
+Кейсы без пары (уникальные события) в ответе упоминать не нужно.
+
+Отвечай строго JSON: {"duplicate_groups": [[id1, id2], [id3, id4, id5]]}"""
 
 
 class YandexProvider:
@@ -647,37 +655,41 @@ class YandexProvider:
             logger.warning(f"batch_score_importance failed: {e}")
             return [50] * len(cases)
 
-    def check_duplicate_llm(self, new_case: dict, candidates: list[dict]) -> int | None:
+    def find_duplicate_groups(self, cases: list[dict]) -> list[list[int]]:
         """
-        LLM-сравнение для пограничных случаев дедупликации: описывает ли
-        new_case то же событие, что один из candidates (та же компания,
-        fuzzy-скор заголовка в "серой зоне")?
-        new_case: {"case_title", "description"}.
-        candidates: [{"id": int, "case_title": str, "description": str}, ...].
-        Возвращает id совпавшего кандидата или None.
+        Один проход по всему пулу кейсов дайджеста: находит группы id,
+        описывающих одно и то же реальное событие. Не полагается на точное
+        совпадение строки company — LLM судит по смыслу (например "Сбер" и
+        "ПАО Сбербанк" распознаются как одна компания).
+        cases: [{"id": int, "case_title": str, "company": str, "description": str}, ...].
+        Возвращает список групп id (только группы из 2+ элементов).
         """
-        if not candidates:
-            return None
+        if len(cases) < 2:
+            return []
 
-        candidates_text = "\n".join(
-            f"{c['id']}. {c.get('case_title', '')} — {(c.get('description') or '')[:150]}"
-            for c in candidates
+        cases_text = "\n".join(
+            f"{c['id']}. [{c.get('company') or '—'}] {c.get('case_title', '')} — {c.get('description') or ''}"
+            for c in cases
         )
         user = (
-            f"НОВЫЙ кейс:\n{new_case.get('case_title', '')} — "
-            f"{(new_case.get('description') or '')[:150]}\n\n"
-            f"КАНДИДАТЫ (той же компании, из базы):\n{candidates_text}\n\n"
-            f'Ответ строго JSON: {{"duplicate_of": id_кандидата_или_null, "reasoning": "кратко"}}'
+            f"Кейсы периода:\n{cases_text}\n\n"
+            f'Ответ строго JSON: {{"duplicate_groups": [[id1, id2], ...]}}'
         )
 
         try:
             from llm.call_logger import llm_call_context
-            with llm_call_context("check_duplicate_llm", context_note=f"candidates={len(candidates)}"):
-                raw = self._call(_DUPLICATE_CHECK_SYSTEM, user, max_tokens=200)
+            with llm_call_context("find_duplicate_groups", context_note=f"cases={len(cases)}"):
+                raw = self._call(_DUPLICATE_GROUPS_SYSTEM, user, max_tokens=800)
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             data = json.loads(match.group()) if match else {}
-            dup_id = data.get("duplicate_of")
-            return int(dup_id) if dup_id is not None else None
+            groups = data.get("duplicate_groups", [])
+            if not isinstance(groups, list):
+                return []
+            return [
+                [int(x) for x in group]
+                for group in groups
+                if isinstance(group, list) and len(group) >= 2
+            ]
         except Exception as e:
-            logger.warning(f"check_duplicate_llm failed: {e}")
-            return None
+            logger.warning(f"find_duplicate_groups failed: {e}")
+            return []

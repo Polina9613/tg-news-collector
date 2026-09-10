@@ -601,7 +601,7 @@ def backfill_snapshots_cmd(
             f"  Неделя {period_start.date()}–{period_end.date()}: "
             f"{len(cases)} кейсов, запрашиваю LLM..."
         )
-        main_summary = generate_main_summary(provider, top_cases)
+        main_summary_clusters = generate_main_summary(provider, top_cases)
         topic_analysis = generate_topic_analysis(provider, topics)
 
         compact_index = [
@@ -617,7 +617,7 @@ def backfill_snapshots_cmd(
         with get_session() as s:
             if existing_id:
                 db_snap = s.get(WeeklySnapshot, existing_id)
-                db_snap.main_summary = main_summary
+                db_snap.main_summary = json.dumps(main_summary_clusters, ensure_ascii=False)
                 db_snap.overall_conclusions = json.dumps(
                     topic_analysis.get("overall_conclusions", []), ensure_ascii=False
                 )
@@ -628,7 +628,7 @@ def backfill_snapshots_cmd(
                 s.add(WeeklySnapshot(
                     period_start=period_start,
                     period_end=period_end,
-                    main_summary=main_summary,
+                    main_summary=json.dumps(main_summary_clusters, ensure_ascii=False),
                     overall_conclusions=json.dumps(
                         topic_analysis.get("overall_conclusions", []), ensure_ascii=False
                     ),

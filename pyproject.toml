@@ -27,7 +27,6 @@ dependencies = [
     "feedparser>=6.0",
     "readability-lxml>=0.8",
     "lxml>=5.0",
-    "rapidfuzz>=3.9",
 ]
 
 [project.optional-dependencies]
