@@ -56,7 +56,7 @@ def test_save_and_load_weekly_snapshot(tmp_path, monkeypatch):
     period_end = datetime.utcnow() - timedelta(days=7)
 
     analysis = {
-        "main_summary": "Тестовое главное",
+        "main_summary_clusters": [{"intro": "Тестовое главное", "bullets": []}],
         "overall_conclusions": ["Вывод 1"],
     }
     topics = {
@@ -102,7 +102,7 @@ def test_load_past_snapshots_finds_prior_week_with_time_offset(tmp_path, monkeyp
     _save_weekly_snapshot(
         past_start,
         past_end,
-        {"main_summary": "Прошлая неделя", "overall_conclusions": ["Вывод"]},
+        {"main_summary_clusters": [{"intro": "Прошлая неделя", "bullets": []}], "overall_conclusions": ["Вывод"]},
         {"Тема": [{"company": "X", "case_title": "Кейс"}]},
     )
 
@@ -130,8 +130,8 @@ def test_save_weekly_snapshot_skips_duplicate(tmp_path, monkeypatch):
     start = datetime(2026, 7, 14, 0, 0, 0)
     end = datetime(2026, 7, 21, 11, 0, 0)
 
-    _save_weekly_snapshot(start, end, {"main_summary": "A", "overall_conclusions": []}, {})
-    _save_weekly_snapshot(start, end, {"main_summary": "B", "overall_conclusions": []}, {})
+    _save_weekly_snapshot(start, end, {"main_summary_clusters": [{"intro": "A", "bullets": []}], "overall_conclusions": []}, {})
+    _save_weekly_snapshot(start, end, {"main_summary_clusters": [{"intro": "B", "bullets": []}], "overall_conclusions": []}, {})
 
     with get_session() as s:
         count = s.query(WeeklySnapshot).count()

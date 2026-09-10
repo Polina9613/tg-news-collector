@@ -15,15 +15,31 @@ _MAIN_SUMMARY_SYSTEM = """Ты — аналитик финтех-дайджес�
 — Не используй усилители: "агрессивно", "взрывной рост", "прямой вызов".
 — Разрешены содержательные оценки: "это говорит о том, что…".
 
-ЗАДАЧА: напиши 1-2 абзаца (main_summary) о 2-4 самых значимых событиях недели
-на основе предоставленных кейсов. Показывай связи между кейсами если они
-реально есть, но не выдумывай.
+ЗАДАЧА: раздели предоставленные кейсы (топ по важности недели) на 3-5
+смысловых мини-кластеров — сгруппируй по общей сути (одна компания,
+одна тема, один тип технологии), а не бери кейсы по одному.
+Для каждого кластера напиши:
+— intro: одно вводное предложение, называющее суть кластера.
+— bullets: 1-3 буллета по кейсам этого кластера. Каждый буллет —
+  конкретный факт из кейса + связка причины или значимости
+  ("...что указывает на...", "...что говорит о...", "...на фоне..."),
+  а не просто пересказ факта без вывода.
 
-Отвечай строго JSON."""
+Если кейсов мало или они разнородны — можно сформировать меньше
+кластеров (но не меньше 2). Не выдумывай факты и связи, которых нет
+в предоставленных кейсах.
+
+Отвечай строго JSON:
+{"main_summary_clusters": [{"intro": "...", "bullets": ["...", "..."]}]}"""
 
 
-def generate_main_summary(provider, top_cases: list[dict]) -> str:
-    """Генерирует только 'Главное за неделю' — лёгкий вызов, малый контекст."""
+def generate_main_summary(provider, top_cases: list[dict]) -> list[dict]:
+    """
+    Генерирует 'Главное за неделю' как 3-5 мини-кластеров {intro, bullets} —
+    лёгкий вызов, малый контекст. Источник данных — топ кейсов по
+    importance_score, независимо от _group_by_topic (не пересекается с
+    группировкой "Новости по темам").
+    """
     top_summary = "\n\n".join(
         f"[{c.get('trend_category', c.get('industry', 'Разное'))}] "
         f"{c.get('company', '—')}: {c.get('case_title', '')}\n"
@@ -36,18 +52,25 @@ def generate_main_summary(provider, top_cases: list[dict]) -> str:
 {top_summary}
 
 Ответ строго JSON:
-{{"main_summary": "1-2 абзаца текста, разделённых \\n\\n"}}"""
+{{"main_summary_clusters": [{{"intro": "...", "bullets": ["...", "..."]}}]}}"""
 
     try:
         from llm.call_logger import llm_call_context
         with llm_call_context("generate_main_summary", context_note="digest"):
-            raw = provider._call(_MAIN_SUMMARY_SYSTEM, user, max_tokens=1000, timeout=90)
+            raw = provider._call(_MAIN_SUMMARY_SYSTEM, user, max_tokens=1200, timeout=90)
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         data = json.loads(match.group()) if match else {}
-        return data.get("main_summary", "")
+        clusters = data.get("main_summary_clusters", [])
+        if not isinstance(clusters, list):
+            return []
+        return [
+            {"intro": c.get("intro") or "", "bullets": c.get("bullets") or []}
+            for c in clusters
+            if isinstance(c, dict)
+        ]
     except Exception as e:
         logger.warning(f"generate_main_summary parse error: {e}")
-        return ""
+        return []
 
 
 _TOPIC_ANALYSIS_SYSTEM = """Ты — аналитик финтех-дайджеста.
@@ -55,8 +78,10 @@ _TOPIC_ANALYSIS_SYSTEM = """Ты — аналитик финтех-дайдже�
 
 ЗАДАЧИ:
 1. Для каждой темы — короткий вывод (до 15 слов) что происходит в теме на этой неделе.
-2. 2-4 вектора изменений — сквозные наблюдения пересекающие несколько тем/кейсов.
-   Если явного паттерна нет — дай меньше пунктов, не выдумывай.
+2. 5-6 векторов изменений — сквозные наблюдения пересекающие несколько тем/кейсов.
+   НЕ пиши по одному выводу на тему — ищи связи МЕЖДУ темами, а не пересказ
+   отдельной темы. Если явного паттерна нет — дай меньше пунктов, не выдумывай;
+   лучше 3 содержательных вывода, чем 6 натянутых.
 
 Отвечай строго JSON."""
 
